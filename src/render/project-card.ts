@@ -1,6 +1,5 @@
 import { escapeXml } from "./escape.ts";
 import { measure } from "./measure.ts";
-import type { Theme } from "./measure.ts";
 import { OCTICONS } from "./octicons.ts";
 import { CARD_PALETTE, FONT } from "./palette.ts";
 import { PROJECTS, STACK_COLORS } from "../content/projects.ts";
@@ -26,31 +25,51 @@ export function layoutStack(p: Project): { x: number; label: string; end: number
   });
 }
 
-function text(x: number, y: number, s: string, size: number, weight: number, fill: string, anchor = "start"): string {
-  return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${fill}">${escapeXml(s)}</text>`;
+function text(x: number, y: number, s: string, size: number, weight: number, cls: string, anchor = "start"): string {
+  return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" class="${cls}">${escapeXml(s)}</text>`;
 }
 
-export function renderProjectCard(p: Project, theme: Theme): string {
-  const c = CARD_PALETTE[theme];
+/** Stack colours that differ between themes get a class; the rest stay plain presentation attributes. */
+function themedDots(): { classes: Map<string, string>; light: string; dark: string } {
+  const classes = new Map<string, string>();
+  let light = "";
+  let dark = "";
+  for (const [label, c] of Object.entries(STACK_COLORS)) {
+    if (c.light === c.dark) continue;
+    const cls = `pc-dot-${classes.size + 1}`;
+    classes.set(label, cls);
+    light += `.${cls}{fill:${c.light}}`;
+    dark += `.${cls}{fill:${c.dark}}`;
+  }
+  return { classes, light, dark };
+}
+
+/** One SVG holding both palettes: light by default, dark under the visitor's colour-scheme preference. */
+export function renderProjectCard(p: Project): string {
+  const L = CARD_PALETTE.light;
+  const D = CARD_PALETTE.dark;
+  const dots = themedDots();
+  const style =
+    `.pc-bg{fill:${L.background};stroke:${L.border}}.pc-pill{fill:none;stroke:${L.border}}.pc-title{fill:${L.title}}.pc-muted{fill:${L.muted}}${dots.light}` +
+    `@media (prefers-color-scheme: dark){.pc-bg{fill:${D.background};stroke:${D.border}}.pc-pill{stroke:${D.border}}.pc-title{fill:${D.title}}.pc-muted{fill:${D.muted}}${dots.dark}}`;
   const pill = pillRect(p);
-  let body = `<svg x="16" y="17" width="16" height="16" viewBox="0 0 16 16"><path fill="${c.muted}" fill-rule="evenodd" d="${OCTICONS[p.icon]}"/></svg>`;
-  body += text(40, 30, p.title, 14, 600, c.title);
-  body += `<rect x="${pill.x}" y="15" width="${pill.width}" height="20" rx="10" fill="none" stroke="${c.border}"/>`;
-  body += text(pill.x + pill.width / 2, 29, p.pill, 12, 500, c.muted, "middle");
-  body += text(16, 58, p.desc[0], 12, 400, c.muted);
-  body += text(16, 75, p.desc[1], 12, 400, c.muted);
+  let body = `<svg x="16" y="17" width="16" height="16" viewBox="0 0 16 16"><path class="pc-muted" fill-rule="evenodd" d="${OCTICONS[p.icon]}"/></svg>`;
+  body += text(40, 30, p.title, 14, 600, "pc-title");
+  body += `<rect x="${pill.x}" y="15" width="${pill.width}" height="20" rx="10" class="pc-pill"/>`;
+  body += text(pill.x + pill.width / 2, 29, p.pill, 12, 500, "pc-muted", "middle");
+  body += text(16, 58, p.desc[0], 12, 400, "pc-muted");
+  body += text(16, 75, p.desc[1], 12, 400, "pc-muted");
   for (const s of layoutStack(p)) {
     const colors = STACK_COLORS[s.label];
     if (!colors) throw new Error(`No STACK_COLORS entry for stack label "${s.label}"`);
-    body += `<circle cx="${s.x + 6}" cy="102" r="6" fill="${colors[theme]}"/>`;
-    body += text(s.x + 16, 106, s.label, 12, 400, c.muted);
+    const cls = dots.classes.get(s.label);
+    body += cls ? `<circle cx="${s.x + 6}" cy="102" r="6" class="${cls}"/>` : `<circle cx="${s.x + 6}" cy="102" r="6" fill="${colors.light}"/>`;
+    body += text(s.x + 16, 106, s.label, 12, 400, "pc-muted");
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${escapeXml(`${p.title}: ${p.pill}`)}"><rect x="0.5" y="0.5" rx="6" width="${WIDTH - 1}" height="${HEIGHT - 1}" fill="${c.background}" stroke="${c.border}"/>${body}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${escapeXml(`${p.title}: ${p.pill}`)}"><style>${style}</style><rect x="0.5" y="0.5" rx="6" width="${WIDTH - 1}" height="${HEIGHT - 1}" class="pc-bg"/>${body}</svg>`;
 }
 
 /** Every static card asset: path relative to public/, and its SVG. */
 export function cardAssets(): { path: string; svg: string }[] {
-  return PROJECTS.flatMap((p) =>
-    (["light", "dark"] as Theme[]).map((theme) => ({ path: `cards/${p.slug}-${theme}.svg`, svg: renderProjectCard(p, theme) })),
-  );
+  return PROJECTS.map((p) => ({ path: `cards/${p.slug}.svg`, svg: renderProjectCard(p) }));
 }

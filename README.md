@@ -17,7 +17,7 @@ Public stats widgets only see public activity. A freelancer's client work lives 
 | Path | Source |
 | --- | --- |
 | `/stats-light.svg`, `/stats-dark.svg` | KV, `GET` and `HEAD` only. Before the first refresh, a placeholder "updating" card is served. |
-| `/cards/<project>-light.svg`, `/cards/<project>-dark.svg` | Static assets (`public/cards/`) |
+| `/cards/<project>.svg` | Static assets (`public/cards/`), one self-theming SVG per project |
 | `/stack/<group>.svg` | Static assets (`public/stack/`) |
 
 The stats endpoints take no parameters (a query string is ignored). Any other path under the Worker that is not a static asset returns 404; other methods on the stats paths return 405.
@@ -69,7 +69,13 @@ The Worker is then live at `https://github-profile-cards.<your-subdomain>.worker
 </picture>
 ```
 
-Project cards use the same `<picture>` pattern (`/cards/<project>-dark.svg` and `-light.svg`). Tech-stack blocks have no dark variant, so a plain `<img>` is enough:
+Project cards are linked, so they are a plain `<a><img></a>`. Each card is one self-theming SVG: it carries both palettes and switches with the visitor's OS/browser colour preference through its own `@media (prefers-color-scheme: dark)` rule. Do not wrap a linked image in `<picture>` on GitHub: the README renderer splits `<a><picture><source><img></picture></a>`, putting the `<img>` in its own link to the raw image outside your anchor and dropping the `<img>` from the `<picture>`, so the click goes to the image and dark switching breaks.
+
+```html
+<a href="https://example.com/project"><img alt="Project" src="https://<worker-url>/cards/<project>.svg" width="410"></a>
+```
+
+Tech-stack blocks have no dark variant, so a plain `<img>` is enough:
 
 ```html
 <img alt="Backend stack" src="https://<worker-url>/stack/backend.svg">
