@@ -8,7 +8,7 @@
     "traces": { "enabled": true }
   },
   "triggers": { "crons": ["0 */6 * * *"] },
-  "kv_namespaces": [{ "binding": "STATS", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+  "kv_namespaces": [{ "binding": "STATS", "id": "fdf85e5edb6e4cc198dbac8e7a97412b" }],
   "assets": { "directory": "./public" },
   "vars": { "GITHUB_LOGIN": "kiri1101" }
 }
