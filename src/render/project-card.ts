@@ -3,7 +3,7 @@ import { measure } from "./measure.ts";
 import type { Theme } from "./measure.ts";
 import { OCTICONS } from "./octicons.ts";
 import { CARD_PALETTE, FONT } from "./palette.ts";
-import { STACK_COLORS } from "../content/projects.ts";
+import { PROJECTS, STACK_COLORS } from "../content/projects.ts";
 import type { Project } from "../content/projects.ts";
 
 const WIDTH = 410;
@@ -40,8 +40,17 @@ export function renderProjectCard(p: Project, theme: Theme): string {
   body += text(16, 58, p.desc[0], 12, 400, c.muted);
   body += text(16, 75, p.desc[1], 12, 400, c.muted);
   for (const s of layoutStack(p)) {
-    body += `<circle cx="${s.x + 6}" cy="102" r="6" fill="${STACK_COLORS[s.label][theme]}"/>`;
+    const colors = STACK_COLORS[s.label];
+    if (!colors) throw new Error(`No STACK_COLORS entry for stack label "${s.label}"`);
+    body += `<circle cx="${s.x + 6}" cy="102" r="6" fill="${colors[theme]}"/>`;
     body += text(s.x + 16, 106, s.label, 12, 400, c.muted);
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${escapeXml(`${p.title}: ${p.pill}`)}"><rect x="0.5" y="0.5" rx="6" width="${WIDTH - 1}" height="${HEIGHT - 1}" fill="${c.background}" stroke="${c.border}"/>${body}</svg>`;
+}
+
+/** Every static card asset: path relative to public/, and its SVG. */
+export function cardAssets(): { path: string; svg: string }[] {
+  return PROJECTS.flatMap((p) =>
+    (["light", "dark"] as Theme[]).map((theme) => ({ path: `cards/${p.slug}-${theme}.svg`, svg: renderProjectCard(p, theme) })),
+  );
 }
