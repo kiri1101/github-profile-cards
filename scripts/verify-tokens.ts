@@ -8,12 +8,20 @@ if (!existsSync(VARS_PATH)) {
   process.exit(1);
 }
 
+function unquote(value: string): string {
+  const first = value[0];
+  if (value.length >= 2 && (first === '"' || first === "'") && value.at(-1) === first) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
 const vars: Record<string, string> = {};
 for (const line of readFileSync(VARS_PATH, "utf8").split(/\r?\n/)) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith("#")) continue;
   const eq = trimmed.indexOf("=");
-  if (eq > 0) vars[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+  if (eq > 0) vars[trimmed.slice(0, eq).trim()] = unquote(trimmed.slice(eq + 1).trim());
 }
 
 const profile = vars.GH_TOKEN_PROFILE;
@@ -31,7 +39,8 @@ try {
   process.exit(1);
 }
 
-console.log(JSON.stringify(stats, null, 2));
+const { name: _name, ...numbers } = stats;
+console.log(JSON.stringify(numbers, null, 2));
 
 const minimums = {
   commitsTotal: 1383,

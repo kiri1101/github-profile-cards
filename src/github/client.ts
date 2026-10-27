@@ -93,10 +93,12 @@ async function graphql<T>(
   if (!res.ok) {
     throw new GitHubError(`GitHub GraphQL request failed with HTTP ${res.status}`, res.status);
   }
-  const json = (await res.json()) as {
-    data?: T | null;
-    errors?: { message?: string }[];
-  };
+  let json: { data?: T | null; errors?: { message?: string }[] };
+  try {
+    json = (await res.json()) as typeof json;
+  } catch {
+    throw new GitHubError("GitHub GraphQL returned a non-JSON body", res.status);
+  }
   if (json.errors?.length) {
     const messages = json.errors.map((e) => e.message ?? "unknown error").join("; ");
     throw new GitHubError(`GitHub GraphQL returned errors: ${messages}`, res.status);
@@ -125,25 +127,35 @@ export async function fetchRawStats(
     throw new GitHubError(`GitHub user "${login}" not found in response`, null);
   }
 
-  const contrib = profile.user.contributionsCollection;
-  const commitsPublic = contrib.commitContributionsByRepository
-    .filter((r) => !r.repository.isPrivate)
-    .reduce((sum, r) => sum + r.contributions.totalCount, 0);
-  const stars = repos.user.repositories.nodes.reduce(
-    (sum, n) => sum + (n?.stargazerCount ?? 0),
-    0,
-  );
+  let stats: RawStats;
+  try {
+    const contrib = profile.user.contributionsCollection;
+    const commitsPublic = contrib.commitContributionsByRepository
+      .filter((r) => !r.repository.isPrivate)
+      .reduce((sum, r) => sum + r.contributions.totalCount, 0);
+    const stars = repos.user.repositories.nodes.reduce(
+      (sum, n) => sum + (n?.stargazerCount ?? 0),
+      0,
+    );
 
-  return {
-    name: profile.user.name ?? login,
-    followers: profile.user.followers.totalCount,
-    reviews: contrib.totalPullRequestReviewContributions,
-    commitsTotal: contrib.totalCommitContributions,
-    commitsPublic,
-    prsTotal: repos.user.pullRequests.totalCount,
-    prsPublic: repos.publicPrs.issueCount,
-    issuesTotal: repos.user.openIssues.totalCount + repos.user.closedIssues.totalCount,
-    issuesPublic: repos.publicIssues.issueCount,
-    stars,
-  };
+    stats = {
+      name: profile.user.name ?? login,
+      followers: profile.user.followers.totalCount,
+      reviews: contrib.totalPullRequestReviewContributions,
+      commitsTotal: contrib.totalCommitContributions,
+      commitsPublic,
+      prsTotal: repos.user.pullRequests.totalCount,
+      prsPublic: repos.publicPrs.issueCount,
+      issuesTotal: repos.user.openIssues.totalCount + repos.user.closedIssues.totalCount,
+      issuesPublic: repos.publicIssues.issueCount,
+      stars,
+    };
+  } catch {
+    throw new GitHubError("GitHub GraphQL returned an unexpected response shape", null);
+  }
+  const { name: _name, ...numbers } = stats;
+  if (!Object.values(numbers).every((n) => typeof n === "number" && Number.isFinite(n))) {
+    throw new GitHubError("GitHub GraphQL returned an unexpected response shape", null);
+  }
+  return stats;
 }

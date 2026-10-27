@@ -8,7 +8,8 @@
         "totalPullRequestReviewContributions": 0,
         "commitContributionsByRepository": [
           { "repository": { "isPrivate": false }, "contributions": { "totalCount": 200 } },
-          { "repository": { "isPrivate": false }, "contributions": { "totalCount": 46 } }
+          { "repository": { "isPrivate": false }, "contributions": { "totalCount": 46 } },
+          { "repository": { "isPrivate": true }, "contributions": { "totalCount": 1137 } }
         ]
       }
     }

@@ -12,6 +12,7 @@
     "deploy": "npm run build && wrangler deploy",
     "verify:tokens": "node scripts/verify-tokens.ts"
   },
+  "dependencies": {},
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.8",
     "@types/node": "^26.6.5",

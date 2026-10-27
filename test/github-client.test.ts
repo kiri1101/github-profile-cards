@@ -66,4 +66,16 @@ describe("fetchRawStats", () => {
     const { fetchFn } = stub({ profile: Response.json({ data: { user: null } }) });
     await expect(fetchRawStats("kiri1101", tokens, fetchFn)).rejects.toBeInstanceOf(GitHubError);
   });
+
+  it("throws GitHubError on a 200 with a non-JSON body", async () => {
+    const { fetchFn } = stub({ repos: new Response("not json", { status: 200 }) });
+    await expect(fetchRawStats("kiri1101", tokens, fetchFn)).rejects.toBeInstanceOf(GitHubError);
+  });
+
+  it("throws GitHubError when a nested field is missing", async () => {
+    const { fetchFn } = stub({
+      profile: Response.json({ data: { user: { name: "X", followers: { totalCount: 1 } } } }),
+    });
+    await expect(fetchRawStats("kiri1101", tokens, fetchFn)).rejects.toBeInstanceOf(GitHubError);
+  });
 });
