@@ -84,6 +84,18 @@ describe("validateSnapshot", () => {
     expect(validateSnapshot(next({ commitsTotal: 691 }), prev).ok).toBe(false);
   });
 
+  it("treats an exactly-90% all-time value as acceptable (integer floor)", () => {
+    const p = next({ prsTotal: 200 });
+    expect(validateSnapshot(next({ prsTotal: 180 }), p)).toEqual({ ok: true });
+    expect(validateSnapshot(next({ prsTotal: 179 }), p).ok).toBe(false);
+  });
+
+  it("treats an exactly-50% last-year value as acceptable (integer floor)", () => {
+    const p = next({ commitsTotal: 1000 });
+    expect(validateSnapshot(next({ commitsTotal: 500 }), p)).toEqual({ ok: true });
+    expect(validateSnapshot(next({ commitsTotal: 499 }), p).ok).toBe(false);
+  });
+
   it("rejects zero where previous was non-zero", () => {
     expect(validateSnapshot(next({ issuesTotal: 0, issuesPublic: 0 }), prev)).toEqual({
       ok: false,
