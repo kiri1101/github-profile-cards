@@ -3,7 +3,7 @@ import type { RawStats } from "../src/github/client.ts";
 import { buildSnapshot, validateSnapshot } from "../src/stats/snapshot.ts";
 
 const full: RawStats = {
-  name: "Jordan Tukuna",
+  name: "Jordan Tukum Folem",
   followers: 3,
   reviews: 0,
   commitsTotal: 1383,
@@ -100,6 +100,32 @@ describe("validateSnapshot", () => {
     expect(validateSnapshot(next({ issuesTotal: 0, issuesPublic: 0 }), prev)).toEqual({
       ok: false,
       reason: "issuesTotal dropped to zero",
+      kind: "drop",
     });
+  });
+
+  it("rejects a public counter dropping to zero", () => {
+    for (const [field, reason] of [
+      ["prsPublic", "prsPublic dropped to zero"],
+      ["commitsPublic", "commitsPublic dropped to zero"],
+      ["issuesPublic", "issuesPublic dropped to zero"],
+    ] as const) {
+      expect(validateSnapshot(next({ [field]: 0 }), prev)).toEqual({
+        ok: false,
+        reason,
+        kind: "drop",
+      });
+    }
+  });
+
+  it("accepts a public counter falling without reaching zero", () => {
+    expect(validateSnapshot(next({ prsPublic: 30 }), prev)).toEqual({ ok: true });
+  });
+
+  it("classifies floor rules as drops and structural problems as invalid", () => {
+    expect(validateSnapshot(next({ prsTotal: 100 }), prev)).toMatchObject({ kind: "drop" });
+    expect(validateSnapshot(next({ commitsPublic: 2000 }), prev)).toMatchObject({ kind: "invalid" });
+    expect(validateSnapshot(next({ name: "" }), prev)).toMatchObject({ kind: "invalid" });
+    expect(validateSnapshot(next({ stars: -1 }), prev)).toMatchObject({ kind: "invalid" });
   });
 });

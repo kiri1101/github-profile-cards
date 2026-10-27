@@ -48,6 +48,13 @@ describe("fetchRawStats", () => {
     expect(r.headers.get("User-Agent")).toBeTruthy();
   });
 
+  it("orders owned repositories by stargazers, like upstream", async () => {
+    const { fetchFn, calls } = stub();
+    await fetchRawStats("kiri1101", tokens, fetchFn);
+    const r = calls.find((c) => c.query.includes("pullRequests"))!;
+    expect(r.query).toContain("orderBy: {field: STARGAZERS, direction: DESC}");
+  });
+
   it("throws GitHubError with status 401 on 401", async () => {
     const { fetchFn } = stub({ profile: new Response("Bad credentials", { status: 401 }) });
     const err = await fetchRawStats("kiri1101", tokens, fetchFn).catch((e: unknown) => e);

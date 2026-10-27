@@ -15,7 +15,8 @@ export function buildSnapshot(raw: RawStats, fetchedAt: Date): Snapshot {
   return { ...raw, level, percentile, fetchedAt: fetchedAt.toISOString() };
 }
 
-type Result = { ok: true } | { ok: false; reason: string };
+/** "drop" = a regression rule fired (may be legitimate); "invalid" = structurally impossible data. */
+export type Result = { ok: true } | { ok: false; reason: string; kind: "drop" | "invalid" };
 
 const COUNTS = [
   "followers",
@@ -37,31 +38,49 @@ const PAIRS = [
 
 // All-time counters should only grow; last-year commits may legitimately shrink.
 const ALL_TIME = ["prsTotal", "issuesTotal", "stars", "followers"] as const;
+// Public counters get the zero check only: a repo turning private is a legitimate drop.
+const PUBLIC = ["commitsPublic", "prsPublic", "issuesPublic"] as const;
 const ALL_TIME_FLOOR = 0.9;
 const LAST_YEAR_FLOOR = 0.5;
 
+const FINGERPRINT_FIELDS = [
+  "commitsTotal",
+  "commitsPublic",
+  "prsTotal",
+  "prsPublic",
+  "issuesTotal",
+  "issuesPublic",
+  "stars",
+  "followers",
+] as const;
+
+/** Identifies a candidate by its counters, so a repeated identical reading can be recognised. */
+export function fingerprint(s: Snapshot): string {
+  return JSON.stringify(FINGERPRINT_FIELDS.map((k) => s[k]));
+}
+
 export function validateSnapshot(next: Snapshot, prev: Snapshot | null): Result {
   if (typeof next.name !== "string" || next.name.trim() === "") {
-    return { ok: false, reason: "empty name" };
+    return { ok: false, reason: "empty name", kind: "invalid" };
   }
   for (const k of COUNTS) {
     if (!Number.isInteger(next[k]) || next[k] < 0) {
-      return { ok: false, reason: `${k} is not a non-negative integer` };
+      return { ok: false, reason: `${k} is not a non-negative integer`, kind: "invalid" };
     }
   }
   for (const [pub, total] of PAIRS) {
     if (next[pub] > next[total]) {
-      return { ok: false, reason: `${pub} exceeds ${total}` };
+      return { ok: false, reason: `${pub} exceeds ${total}`, kind: "invalid" };
     }
   }
   if (!prev) return { ok: true };
 
   const check = (k: "commitsTotal" | (typeof ALL_TIME)[number], floor: number): Result => {
     if (prev[k] > 0 && next[k] === 0) {
-      return { ok: false, reason: `${k} dropped to zero` };
+      return { ok: false, reason: `${k} dropped to zero`, kind: "drop" };
     }
     if (next[k] < prev[k] * floor) {
-      return { ok: false, reason: `${k} fell from ${prev[k]} to ${next[k]}` };
+      return { ok: false, reason: `${k} fell from ${prev[k]} to ${next[k]}`, kind: "drop" };
     }
     return { ok: true };
   };
@@ -69,5 +88,12 @@ export function validateSnapshot(next: Snapshot, prev: Snapshot | null): Result 
     const r = check(k, ALL_TIME_FLOOR);
     if (!r.ok) return r;
   }
-  return check("commitsTotal", LAST_YEAR_FLOOR);
+  const commits = check("commitsTotal", LAST_YEAR_FLOOR);
+  if (!commits.ok) return commits;
+  for (const k of PUBLIC) {
+    if (prev[k] > 0 && next[k] === 0) {
+      return { ok: false, reason: `${k} dropped to zero`, kind: "drop" };
+    }
+  }
+  return { ok: true };
 }

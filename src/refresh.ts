@@ -1,10 +1,16 @@
 import { fetchRawStats, GitHubError } from "./github/client.ts";
 import { renderStatsCard } from "./render/stats-card.ts";
-import { buildSnapshot, validateSnapshot, type Snapshot } from "./stats/snapshot.ts";
+import { buildSnapshot, fingerprint, validateSnapshot, type Snapshot } from "./stats/snapshot.ts";
 
 export const KEY_LIGHT = "stats-light.svg";
 export const KEY_DARK = "stats-dark.svg";
 export const KEY_SNAPSHOT = "snapshot.json";
+export const KEY_PENDING = "pending.json";
+
+/** After this many identical rejected drops (24 h at the 6-hourly cron) the drop is accepted as real. */
+const ACCEPT_AFTER = 4;
+
+type Pending = { fingerprint: string; count: number; firstSeenAt: string };
 
 export type RefreshResult = { ok: true } | { ok: false; reason: string };
 
@@ -23,6 +29,24 @@ async function readPrevious(env: Env): Promise<Snapshot | null> {
   }
 }
 
+async function readPending(env: Env): Promise<Pending | null> {
+  try {
+    return await env.STATS.get<Pending>(KEY_PENDING, "json");
+  } catch {
+    return null;
+  }
+}
+
+async function publish(env: Env, next: Snapshot): Promise<void> {
+  await Promise.all([
+    env.STATS.put(KEY_LIGHT, renderStatsCard(next, "light")),
+    env.STATS.put(KEY_DARK, renderStatsCard(next, "dark")),
+  ]);
+  // Snapshot last: a partial failure must leave an older prev than the images, never a newer one.
+  await env.STATS.put(KEY_SNAPSHOT, JSON.stringify(next));
+  await env.STATS.delete(KEY_PENDING);
+}
+
 export async function refresh(
   env: Env,
   now: Date,
@@ -37,13 +61,26 @@ export async function refresh(
     );
     const next = buildSnapshot(raw, now);
     const verdict = validateSnapshot(next, prev);
-    if (!verdict.ok) return fail(verdict.reason);
-    await Promise.all([
-      env.STATS.put(KEY_LIGHT, renderStatsCard(next, "light")),
-      env.STATS.put(KEY_DARK, renderStatsCard(next, "dark")),
-    ]);
-    // Snapshot last: a partial failure must leave an older prev than the images, never a newer one.
-    await env.STATS.put(KEY_SNAPSHOT, JSON.stringify(next));
+    if (!verdict.ok) {
+      if (verdict.kind === "invalid") return fail(verdict.reason);
+      // A drop may be real (transferred or deleted repo); accept it once it has repeated unchanged.
+      const fp = fingerprint(next);
+      const old = await readPending(env);
+      const pending: Pending =
+        old && old.fingerprint === fp
+          ? { ...old, count: old.count + 1 }
+          : { fingerprint: fp, count: 1, firstSeenAt: now.toISOString() };
+      if (pending.count < ACCEPT_AFTER) {
+        await env.STATS.put(KEY_PENDING, JSON.stringify(pending));
+        return fail(verdict.reason);
+      }
+      console.warn(
+        JSON.stringify({ event: "drop_accepted", reason: verdict.reason, count: pending.count }),
+      );
+      await publish(env, next);
+      return { ok: true };
+    }
+    await publish(env, next);
     return { ok: true };
   } catch (e) {
     // Only the HTTP status or error message is logged; tokens never appear in either.

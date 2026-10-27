@@ -43,7 +43,7 @@ const REPOS_QUERY = `query($login: String!, $prQ: String!, $issueQ: String!) {
     pullRequests { totalCount }
     openIssues: issues(states: OPEN) { totalCount }
     closedIssues: issues(states: CLOSED) { totalCount }
-    repositories(ownerAffiliations: OWNER, first: 100) { nodes { stargazerCount } }
+    repositories(ownerAffiliations: OWNER, first: 100, orderBy: {field: STARGAZERS, direction: DESC}) { nodes { stargazerCount } }
   }
   publicPrs: search(query: $prQ, type: ISSUE) { issueCount }
   publicIssues: search(query: $issueQ, type: ISSUE) { issueCount }

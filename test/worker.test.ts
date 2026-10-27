@@ -13,6 +13,7 @@ import repos from "./fixtures/repos.json" with { type: "json" };
 const NOW = new Date("2026-10-27T06:00:00Z");
 const NO_NETWORK = new Error("network disabled in tests");
 const KEYS = ["stats-light.svg", "stats-dark.svg", "snapshot.json"];
+const ALL_KEYS = [...KEYS, "pending.json"];
 
 function stub(opts: { status?: number; repos?: unknown } = {}) {
   return (async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -25,7 +26,7 @@ function stub(opts: { status?: number; repos?: unknown } = {}) {
 }
 
 async function clearKv() {
-  for (const k of KEYS) await env.STATS.delete(k);
+  for (const k of ALL_KEYS) await env.STATS.delete(k);
 }
 
 async function get(path: string, init?: RequestInit) {
@@ -76,6 +77,95 @@ describe("refresh", () => {
   });
 });
 
+function dropped(prs = 100, extra: Record<string, unknown> = {}) {
+  const m = structuredClone(repos);
+  m.data.user.pullRequests.totalCount = prs;
+  return stub({ repos: m, ...extra });
+}
+
+describe("drop recovery (pending.json)", () => {
+  async function seed() {
+    await refresh(env, NOW, stub());
+    return Promise.all(KEYS.map((k) => env.STATS.get(k)));
+  }
+  const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+  it("rejects three identical drops, leaving KV unchanged, and accepts the fourth", async () => {
+    const before = await seed();
+    const err = quiet();
+    for (let i = 1; i <= 3; i++) {
+      const res = await refresh(env, NOW, dropped());
+      expect(res).toEqual({ ok: false, reason: "prsTotal fell from 237 to 100" });
+      expect(await Promise.all(KEYS.map((k) => env.STATS.get(k)))).toEqual(before);
+      expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(i);
+    }
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await refresh(env, NOW, dropped())).toEqual({ ok: true });
+    const snap = JSON.parse((await env.STATS.get("snapshot.json"))!);
+    expect(snap.prsTotal).toBe(100);
+    expect(await env.STATS.get("stats-light.svg")).not.toBe(before[0]);
+    expect(await env.STATS.get("pending.json")).toBeNull();
+    const logged = JSON.stringify([...err.mock.calls, ...log.mock.calls, ...warn.mock.calls]);
+    expect(logged).toContain("drop_accepted");
+  });
+
+  it("stores fingerprint, count and firstSeenAt", async () => {
+    await seed();
+    quiet();
+    await refresh(env, NOW, dropped());
+    const p = JSON.parse((await env.STATS.get("pending.json"))!);
+    expect(p.count).toBe(1);
+    expect(p.firstSeenAt).toBe(NOW.toISOString());
+    expect(typeof p.fingerprint).toBe("string");
+  });
+
+  it("a differing candidate in between resets the count", async () => {
+    await seed();
+    quiet();
+    await refresh(env, NOW, dropped(100));
+    await refresh(env, NOW, dropped(100));
+    await refresh(env, NOW, dropped(90));
+    expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(1);
+    await refresh(env, NOW, dropped(100));
+    await refresh(env, NOW, dropped(100));
+    const res = await refresh(env, NOW, dropped(100));
+    expect(res.ok).toBe(false);
+    expect(JSON.parse((await env.STATS.get("snapshot.json"))!).prsTotal).toBe(237);
+  });
+
+  it("a structural invalidity never accumulates", async () => {
+    await seed();
+    quiet();
+    const m = structuredClone(repos);
+    m.data.user.pullRequests.totalCount = 10; // below public count => public > total
+    for (let i = 0; i < 6; i++) {
+      const res = await refresh(env, NOW, stub({ repos: m }));
+      expect(res.ok).toBe(false);
+    }
+    expect(await env.STATS.get("pending.json")).toBeNull();
+    expect(JSON.parse((await env.STATS.get("snapshot.json"))!).prsTotal).toBe(237);
+  });
+
+  it("a normal success clears pending.json", async () => {
+    await seed();
+    quiet();
+    await refresh(env, NOW, dropped());
+    expect(await env.STATS.get("pending.json")).not.toBeNull();
+    expect(await refresh(env, NOW, stub())).toEqual({ ok: true });
+    expect(await env.STATS.get("pending.json")).toBeNull();
+  });
+
+  it("a public counter dropping to zero is held back like other drops", async () => {
+    await seed();
+    quiet();
+    const m = structuredClone(repos);
+    m.data.publicPrs.issueCount = 0;
+    const res = await refresh(env, NOW, stub({ repos: m }));
+    expect(res).toEqual({ ok: false, reason: "prsPublic dropped to zero" });
+  });
+});
+
 describe("refresh failure causes and recovery", () => {
   it("keeps the cause of a 200 response carrying GraphQL errors", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -115,7 +205,38 @@ describe("scheduled", () => {
   });
 });
 
+describe("scheduled failure signalling", () => {
+  it("rejects when the refresh fails and resolves when it succeeds", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (async () => new Response("nope", { status: 401 })) as typeof fetch,
+    );
+    const ctx = createExecutionContext();
+    await expect(
+      worker.scheduled(createScheduledController({ scheduledTime: NOW, cron: "0 */6 * * *" }), env, ctx),
+    ).rejects.toThrow(/401/);
+    await waitOnExecutionContext(ctx);
+    expect(JSON.stringify(err.mock.calls)).not.toContain("test-profile");
+  });
+});
+
 describe("fetch handler", () => {
+  it("a throwing KV read serves the placeholder with no-store", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = { ...env, STATS: { get: async () => { throw new Error("kv down"); } } } as unknown as Env;
+    const request = new Request("https://x.test/stats-light.svg") as Request<
+      unknown,
+      IncomingRequestCfProperties
+    >;
+    const res = await worker.fetch(request, broken);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("updating");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Content-Type")).toBe("image/svg+xml; charset=utf-8");
+    expect(JSON.stringify(err.mock.calls)).toContain("kv_read_failed");
+  });
+
   it("GET /stats-dark.svg?theme=light serves the dark SVG", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
     await env.STATS.put("stats-dark.svg", "<svg>dark</svg>");
