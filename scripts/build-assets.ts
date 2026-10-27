@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { TECH_BLOCKS } from "../src/content/tech-stack.ts";
 import { cardAssets } from "../src/render/project-card.ts";
 import { assertBlockIntegrity, blockAssets } from "../src/render/tech-block.ts";
@@ -10,7 +10,24 @@ function write(assets: { path: string; svg: string }[]): void {
   for (const a of assets) writeFileSync(new URL(a.path, PUBLIC), a.svg);
 }
 
-mkdirSync(new URL("cards/", PUBLIC), { recursive: true });
+/** Start each output directory clean so renamed or removed assets are not deployed. */
+function resetDir(name: string): void {
+  rmSync(new URL(name, PUBLIC), { recursive: true, force: true });
+  mkdirSync(new URL(name, PUBLIC), { recursive: true });
+}
+
+// Static assets bypass the Worker, so give them the same hardening headers the stats route sends.
+writeFileSync(
+  new URL("_headers", PUBLIC),
+  [
+    "/*",
+    "  X-Content-Type-Options: nosniff",
+    "  Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'",
+    "",
+  ].join("\n"),
+);
+
+resetDir("cards/");
 const cards = cardAssets();
 write(cards);
 console.log(`wrote ${cards.length} project cards to public/cards`);
@@ -33,7 +50,7 @@ for (const name of ["inertia", "quasar"]) {
   simple[name] = d;
 }
 
-mkdirSync(new URL("stack/", PUBLIC), { recursive: true });
+resetDir("stack/");
 const blocks = blockAssets({ skill, simple });
 for (const b of blocks) assertBlockIntegrity(b.svg, b.path);
 write(blocks);
