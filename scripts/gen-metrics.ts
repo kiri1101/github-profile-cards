@@ -11,7 +11,7 @@ const FILES: Record<string, string> = {
 
 const chars: string[] = [];
 for (let c = 32; c <= 126; c++) chars.push(String.fromCharCode(c));
-chars.push(..."·—→–’é");
+chars.push(..."·—→–’é…");
 
 const out: Record<string, Record<string, number>> = {};
 for (const [weight, path] of Object.entries(FILES)) {

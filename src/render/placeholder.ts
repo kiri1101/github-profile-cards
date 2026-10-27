@@ -1,4 +1,4 @@
-import { frame } from "./frame.ts";
+import { CARD_HEIGHT, CARD_WIDTH, frame } from "./frame.ts";
 import type { Theme } from "./measure.ts";
 import { FONT, STATS_PALETTE } from "./palette.ts";
 
@@ -8,6 +8,6 @@ export function renderPlaceholder(theme: Theme): string {
   return frame(
     C.background,
     "t",
-    `<title id="t">GitHub stats are updating</title><text x="247.5" y="145" text-anchor="middle" dominant-baseline="central" style="font:400 14px ${FONT};fill:${C.muted}">GitHub stats are updating</text>`,
+    `<title id="t">GitHub stats are updating</title><text x="${CARD_WIDTH / 2}" y="${CARD_HEIGHT / 2}" text-anchor="middle" dominant-baseline="central" style="font:400 14px ${FONT};fill:${C.muted}">GitHub stats are updating</text>`,
   );
 }
