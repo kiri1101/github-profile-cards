@@ -14,10 +14,23 @@ async function get(url: string): Promise<string> {
 
 /** skillicons.dev wraps one 256x256 <svg> per icon in an outer 48x48 <svg>; keep only the nested one. */
 function extractNested(svg: string, id: string): string {
-  const start = svg.indexOf("<svg", svg.indexOf("<svg") + 4);
-  const end = svg.lastIndexOf("</svg>", svg.lastIndexOf("</svg>") - 1) + "</svg>".length;
-  if (start < 0 || end <= start) throw new Error(`no nested <svg> in icon ${id}`);
-  return svg.slice(start, end);
+  let depth = 0;
+  let start = -1;
+  let nested: string | null = null;
+  for (const t of svg.matchAll(/<svg\b[^>]*?(\/?)>|<\/svg>/g)) {
+    if (t[0] === "</svg>") {
+      depth--;
+      if (depth === 1 && start >= 0 && nested === null) nested = svg.slice(start, t.index + t[0].length);
+      if (depth === 0 && nested === null) throw new Error(`icon ${id}: no nested <svg> inside the outer one`);
+    } else {
+      if (t[1] === "/") throw new Error(`icon ${id}: unexpected self-closing <svg>`);
+      depth++;
+      if (depth === 2 && start < 0) start = t.index;
+      else if (depth === 2 || depth > 2) throw new Error(`icon ${id}: expected one outer <svg> and one nested <svg>`);
+    }
+  }
+  if (nested === null || depth !== 0) throw new Error(`icon ${id}: expected one outer <svg> and one nested <svg>`);
+  return nested;
 }
 
 const ids = TECH_BLOCKS.flatMap((b) => b.icons.flatMap((i) => (i.kind === "skill" ? [i.id] : [])));

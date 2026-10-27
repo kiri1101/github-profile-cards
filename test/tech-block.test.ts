@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TECH_BLOCKS } from "../src/content/tech-stack.ts";
-import { blockAssets, namespaceIds, renderCustomTile, renderTechBlock } from "../src/render/tech-block.ts";
+import { assertBlockIntegrity, blockAssets, namespaceIds, renderCustomTile, renderTechBlock } from "../src/render/tech-block.ts";
 import { measure } from "../src/render/measure.ts";
 
 const tiles = (n: number) => Array.from({ length: n }, (_, i) => `<svg data-tile="${i}"/>`);
@@ -36,23 +36,55 @@ describe("namespaceIds", () => {
     expect(out).not.toContain('id="a"');
     expect(out).not.toContain("url(#a)");
   });
+  it("rewrites xlink:href and single-quoted attributes", () => {
+    const xl = namespaceIds('<svg><g id="a"/><use xlink:href="#a"/></svg>', "t0");
+    expect(xl).toContain('id="t0-a"');
+    expect(xl).toContain('xlink:href="#t0-a"');
+    const sq = namespaceIds("<svg><g id='a'/><use href='#a'/><path fill=\"url('#a')\"/></svg>", "t1");
+    expect(sq).toContain("id='t1-a'");
+    expect(sq).toContain("href='#t1-a'");
+    expect(sq).toContain("url('#t1-a')");
+    expect(sq).not.toMatch(/id='a'/);
+  });
+});
+
+describe("assertBlockIntegrity", () => {
+  it("accepts unique ids with resolving references", () => {
+    expect(() => assertBlockIntegrity('<svg><g id="x"/><use href="#x"/><p fill="url(#x)"/></svg>', "b")).not.toThrow();
+  });
+  it("rejects duplicate ids", () => {
+    expect(() => assertBlockIntegrity('<svg><g id="x"/><g id="x"/></svg>', "b")).toThrow(/duplicate id "x"/);
+  });
+  it("rejects dangling references", () => {
+    expect(() => assertBlockIntegrity('<svg><p fill="url(#nope)"/></svg>', "b")).toThrow(/missing id "nope"/);
+    expect(() => assertBlockIntegrity('<svg><use xlink:href="#nope"/></svg>', "b")).toThrow(/missing id "nope"/);
+  });
 });
 
 describe("renderCustomTile", () => {
-  it("falls back to a centred wordmark", () => {
+  const sizeOf = (svg: string) => Number(/font-size="([\d.]+)"/.exec(svg)![1]);
+  const linesOf = (svg: string) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+  it("falls back to a centred single-line wordmark", () => {
     const svg = renderCustomTile("Pest", null);
     expect(svg).toContain('fill="#242938"');
     expect(svg).toContain('rx="60"');
     expect(svg).toContain(">Pest<");
     expect(svg).toContain('fill="#F28D1A"');
     expect(svg).toContain('text-anchor="middle"');
-    const size = Number(/font-size="([\d.]+)"/.exec(svg)![1]);
-    expect(measure("Pest", size, 700)).toBeLessThanOrEqual(200);
+    expect(svg).toContain('dominant-baseline="central"');
+    expect(svg).toContain('y="128"');
+    expect(linesOf(svg)).toEqual(["Pest"]);
+    expect(measure("Pest", sizeOf(svg), 700)).toBeLessThanOrEqual(200);
   });
-  it("keeps the longest wordmark within 200 units", () => {
+  it("splits Playwright over two legible, evenly spaced lines", () => {
     const svg = renderCustomTile("Playwright", null);
-    const size = Number(/font-size="([\d.]+)"/.exec(svg)![1]);
-    expect(measure("Playwright", size, 700)).toBeLessThanOrEqual(200);
+    expect(linesOf(svg)).toEqual(["Play", "wright"]);
+    const size = sizeOf(svg);
+    expect(size).toBeGreaterThanOrEqual(56);
+    for (const l of linesOf(svg)) expect(measure(l, size, 700)).toBeLessThanOrEqual(200);
+    const ys = [...svg.matchAll(/<text[^>]* y="([\d.]+)"/g)].map((m) => Number(m[1]));
+    expect(ys[0] + ys[1]).toBeCloseTo(256, 5);
+    expect(ys[1] - ys[0] + size).toBeLessThanOrEqual(256 - 2 * 20);
   });
   it("draws a Simple Icons path scaled into the tile", () => {
     const svg = renderCustomTile("Quasar", "M0 0h24v24z");
