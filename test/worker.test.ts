@@ -11,6 +11,7 @@ import profile from "./fixtures/profile.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 
 const NOW = new Date("2026-10-27T06:00:00Z");
+const NO_NETWORK = new Error("network disabled in tests");
 const KEYS = ["stats-light.svg", "stats-dark.svg", "snapshot.json"];
 
 function stub(opts: { status?: number; repos?: unknown } = {}) {
@@ -66,19 +67,42 @@ describe("refresh", () => {
   it("an implausible drop keeps the last good images", async () => {
     await refresh(env, NOW, stub());
     const before = await Promise.all(KEYS.map((k) => env.STATS.get(k)));
-    const text = JSON.stringify(repos);
-    expect(text).toContain("237");
-    const mutated = JSON.parse(text.replace(/237/g, "100"));
+    const mutated = structuredClone(repos);
+    mutated.data.user.pullRequests.totalCount = 100;
     vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await refresh(env, NOW, stub({ repos: mutated }));
-    expect(res.ok).toBe(false);
+    expect(res).toEqual({ ok: false, reason: "prsTotal fell from 237 to 100" });
     expect(await Promise.all(KEYS.map((k) => env.STATS.get(k)))).toEqual(before);
+  });
+});
+
+describe("refresh failure causes and recovery", () => {
+  it("keeps the cause of a 200 response carrying GraphQL errors", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchFn = (async () =>
+      Response.json({ errors: [{ message: "Bad credentials probe" }] })) as typeof fetch;
+    const res = await refresh(env, NOW, fetchFn);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toContain("Bad credentials probe");
+  });
+
+  it("recovers from a corrupt snapshot.json", async () => {
+    await env.STATS.put("snapshot.json", "{not json");
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await refresh(env, NOW, stub())).toEqual({ ok: true });
+    expect(JSON.stringify(err.mock.calls)).toContain("snapshot_unreadable");
+    expect(JSON.parse((await env.STATS.get("snapshot.json"))!).level).toBe("B+");
   });
 });
 
 describe("scheduled", () => {
   it("scheduled() runs refresh", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(stub());
+    const auth: string[] = [];
+    const inner = stub();
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (u: RequestInfo | URL, init?: RequestInit) => {
+      auth.push(new Headers(init?.headers).get("Authorization") ?? "");
+      return inner(u, init);
+    }) as typeof fetch);
     const ctx = createExecutionContext();
     await worker.scheduled(
       createScheduledController({ scheduledTime: NOW, cron: "0 */6 * * *" }),
@@ -87,12 +111,13 @@ describe("scheduled", () => {
     );
     await waitOnExecutionContext(ctx);
     expect(await env.STATS.get("stats-dark.svg")).not.toBeNull();
+    expect(auth.sort()).toEqual(["bearer test-profile", "bearer test-repos"]);
   });
 });
 
 describe("fetch handler", () => {
   it("GET /stats-dark.svg?theme=light serves the dark SVG", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
     await env.STATS.put("stats-dark.svg", "<svg>dark</svg>");
     await env.STATS.put("stats-light.svg", "<svg>light</svg>");
     const res = await get("/stats-dark.svg?theme=light");
@@ -108,7 +133,7 @@ describe("fetch handler", () => {
   });
 
   it("empty KV serves the placeholder", async () => {
-    const spy = vi.spyOn(globalThis, "fetch");
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
     const res = await get("/stats-light.svg");
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("updating");
@@ -121,6 +146,7 @@ describe("fetch handler", () => {
     const res = await get("/stats-light.svg", { method: "HEAD" });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("image/svg+xml; charset=utf-8");
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=3600");
     expect(await res.text()).toBe("");
   });
 
@@ -133,5 +159,12 @@ describe("fetch handler", () => {
   it("other paths return 404", async () => {
     expect((await get("/stats-light.svg/")).status).toBe(404);
     expect((await get("/other")).status).toBe(404);
+  });
+});
+
+describe("test credentials", () => {
+  it("uses the fake test tokens, never a local .dev.vars", () => {
+    expect(env.GH_TOKEN_PROFILE).toBe("test-profile");
+    expect(env.GH_TOKEN_REPOS).toBe("test-repos");
   });
 });
