@@ -39,8 +39,22 @@ describe("validateSnapshot", () => {
   });
 
   it("rejects negative, NaN or non-integer counts", () => {
-    for (const bad of [-1, NaN, 1.5]) {
-      expect(validateSnapshot(next({ stars: bad }), null).ok).toBe(false);
+    const fields = [
+      "followers",
+      "reviews",
+      "commitsTotal",
+      "commitsPublic",
+      "prsTotal",
+      "prsPublic",
+      "issuesTotal",
+      "issuesPublic",
+      "stars",
+    ] as const;
+    for (const field of fields) {
+      for (const bad of [-1, NaN, 1.5]) {
+        const r = validateSnapshot(next({ [field]: bad }), null);
+        expect(r.ok, `${field}=${bad}`).toBe(false);
+      }
     }
   });
 
@@ -60,7 +74,20 @@ describe("validateSnapshot", () => {
     expect(validateSnapshot(next({ commitsTotal: 600 }), prev).ok).toBe(false);
   });
 
+  it("accepts the exact 90% all-time boundary and rejects just below", () => {
+    expect(validateSnapshot(next({ prsTotal: 214 }), prev)).toEqual({ ok: true });
+    expect(validateSnapshot(next({ prsTotal: 213 }), prev).ok).toBe(false);
+  });
+
+  it("accepts the exact 50% last-year boundary and rejects just below", () => {
+    expect(validateSnapshot(next({ commitsTotal: 692 }), prev)).toEqual({ ok: true });
+    expect(validateSnapshot(next({ commitsTotal: 691 }), prev).ok).toBe(false);
+  });
+
   it("rejects zero where previous was non-zero", () => {
-    expect(validateSnapshot(next({ issuesTotal: 0, issuesPublic: 0 }), prev).ok).toBe(false);
+    expect(validateSnapshot(next({ issuesTotal: 0, issuesPublic: 0 }), prev)).toEqual({
+      ok: false,
+      reason: "issuesTotal dropped to zero",
+    });
   });
 });

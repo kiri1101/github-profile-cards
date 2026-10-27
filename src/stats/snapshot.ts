@@ -58,7 +58,7 @@ export function validateSnapshot(next: Snapshot, prev: Snapshot | null): Result 
 
   const check = (k: "commitsTotal" | (typeof ALL_TIME)[number], floor: number): Result => {
     if (prev[k] > 0 && next[k] === 0) {
-      return { ok: false, reason: `${k} dropped to zero from ${prev[k]}` };
+      return { ok: false, reason: `${k} dropped to zero` };
     }
     if (next[k] < prev[k] * floor) {
       return { ok: false, reason: `${k} fell from ${prev[k]} to ${next[k]}` };
