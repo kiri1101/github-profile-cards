@@ -69,8 +69,14 @@ describe("project cards", () => {
     const dots = svg.match(/<circle[^>]*class="([^"]+)"/g)!;
     expect(dots).toHaveLength(1);
     const cls = dots[0].match(/class="([^"]+)"/)![1];
-    expect(light).toMatch(new RegExp(`\.${cls}\s*\{[^}]*#1f2328`));
-    expect(dark).toMatch(new RegExp(`\.${cls}\s*\{[^}]*#e6edf3`));
+    expect(cls).toBe("pc-dot-next-js-15");
+    const rule = (hex: string) => new RegExp(String.raw`\.${cls.replace(/[.*+?^${}()|[\]\\-]/g, String.raw`\$&`)}\s*\{[^}]*${hex}`);
+    expect(light).toMatch(rule("#1f2328"));
+    expect(light).not.toMatch(rule("#e6edf3"));
+    expect(dark).toMatch(rule("#e6edf3"));
+    expect(dark).not.toMatch(rule("#1f2328"));
+    // sanity: without the dark rule the dark assertion must fail
+    expect(dark.replace(/\.pc-dot-next-js-15\{[^}]*\}/, "")).not.toMatch(rule("#e6edf3"));
     for (const label of ["Laravel 12", "React 19"]) {
       expect(svg).toContain(`fill="${STACK_COLORS[label].light}"`);
       expect(STACK_COLORS[label].light).toBe(STACK_COLORS[label].dark);

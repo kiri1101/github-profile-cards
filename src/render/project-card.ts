@@ -29,14 +29,15 @@ function text(x: number, y: number, s: string, size: number, weight: number, cls
   return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" class="${cls}">${escapeXml(s)}</text>`;
 }
 
-/** Stack colours that differ between themes get a class; the rest stay plain presentation attributes. */
-function themedDots(): { classes: Map<string, string>; light: string; dark: string } {
+/** Stack colours that differ between themes get a class named after the label (e.g. pc-dot-next-js-15). */
+function buildThemedDots(): { classes: Map<string, string>; light: string; dark: string } {
   const classes = new Map<string, string>();
   let light = "";
   let dark = "";
   for (const [label, c] of Object.entries(STACK_COLORS)) {
     if (c.light === c.dark) continue;
-    const cls = `pc-dot-${classes.size + 1}`;
+    const cls = `pc-dot-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    if ([...classes.values()].includes(cls)) throw new Error(`Stack label "${label}" produces a duplicate dot class "${cls}"`);
     classes.set(label, cls);
     light += `.${cls}{fill:${c.light}}`;
     dark += `.${cls}{fill:${c.dark}}`;
@@ -44,11 +45,14 @@ function themedDots(): { classes: Map<string, string>; light: string; dark: stri
   return { classes, light, dark };
 }
 
+// STACK_COLORS is static, so the themed-dot classes and rules are computed once.
+const THEMED_DOTS = buildThemedDots();
+
 /** One SVG holding both palettes: light by default, dark under the visitor's colour-scheme preference. */
 export function renderProjectCard(p: Project): string {
   const L = CARD_PALETTE.light;
   const D = CARD_PALETTE.dark;
-  const dots = themedDots();
+  const dots = THEMED_DOTS;
   const style =
     `.pc-bg{fill:${L.background};stroke:${L.border}}.pc-pill{fill:none;stroke:${L.border}}.pc-title{fill:${L.title}}.pc-muted{fill:${L.muted}}${dots.light}` +
     `@media (prefers-color-scheme: dark){.pc-bg{fill:${D.background};stroke:${D.border}}.pc-pill{stroke:${D.border}}.pc-title{fill:${D.title}}.pc-muted{fill:${D.muted}}${dots.dark}}`;
@@ -63,6 +67,7 @@ export function renderProjectCard(p: Project): string {
     const colors = STACK_COLORS[s.label];
     if (!colors) throw new Error(`No STACK_COLORS entry for stack label "${s.label}"`);
     const cls = dots.classes.get(s.label);
+    // Dots whose light and dark colours are equal keep a plain fill attribute (the light value) and get no CSS rule.
     body += cls ? `<circle cx="${s.x + 6}" cy="102" r="6" class="${cls}"/>` : `<circle cx="${s.x + 6}" cy="102" r="6" fill="${colors.light}"/>`;
     body += text(s.x + 16, 106, s.label, 12, 400, "pc-muted");
   }
