@@ -89,7 +89,7 @@ Project card and tech-stack content lives in `src/content/`. `public/` is build 
 
 ## Troubleshooting
 
-**The stats card is stuck on an old "updated" date and Workers Logs show `refresh_failed ... fell from X to Y` (or `... dropped to zero`).** The Worker rejects any all-time counter that falls sharply, in case GitHub returned bad data. If the drop is real (for example a private repository was transferred to a client organisation), it heals itself: after 4 identical rejected refreshes (about 24 hours at the 6-hourly cron) the new numbers are accepted, logged as `drop_accepted`, and the card updates. To accept immediately, delete the stored baseline and let the next cron store a fresh one:
+**The stats card is stuck on an old "updated" date and Workers Logs show `refresh_failed ... fell from X to Y` (or `... dropped to zero`).** The Worker rejects any all-time counter that falls sharply, in case GitHub returned bad data. If the drop is real (for example a private repository was transferred to a client organisation), it heals itself: three refreshes are rejected, and the fourth that shows the same value for the dropped counter(s) is accepted (about 18 to 24 hours at the 6-hourly cron), logged as `drop_accepted`, and the card updates. A change in a dropped counter's value, or another counter newly dropping, restarts the count. To accept immediately, delete the stored baseline and let the next cron store a fresh one:
 
 ```
 npx wrangler kv key delete snapshot.json --binding STATS --remote

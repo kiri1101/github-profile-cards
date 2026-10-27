@@ -1,6 +1,6 @@
 import { fetchRawStats, GitHubError } from "./github/client.ts";
 import { renderStatsCard } from "./render/stats-card.ts";
-import { buildSnapshot, fingerprint, validateSnapshot, type Snapshot } from "./stats/snapshot.ts";
+import { buildSnapshot, validateSnapshot, type Snapshot } from "./stats/snapshot.ts";
 
 export const KEY_LIGHT = "stats-light.svg";
 export const KEY_DARK = "stats-dark.svg";
@@ -10,7 +10,7 @@ export const KEY_PENDING = "pending.json";
 /** After this many identical rejected drops (24 h at the 6-hourly cron) the drop is accepted as real. */
 const ACCEPT_AFTER = 4;
 
-type Pending = { fingerprint: string; count: number; firstSeenAt: string };
+type Pending = { signature: [string, number][]; count: number; firstSeenAt: string };
 
 export type RefreshResult = { ok: true } | { ok: false; reason: string };
 
@@ -29,12 +29,31 @@ async function readPrevious(env: Env): Promise<Snapshot | null> {
   }
 }
 
+function isPending(v: unknown): v is Pending {
+  if (typeof v !== "object" || v === null) return false;
+  const p = v as Record<string, unknown>;
+  return (
+    Array.isArray(p.signature) &&
+    p.signature.every(
+      (e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "number",
+    ) &&
+    typeof p.count === "number" &&
+    Number.isInteger(p.count) &&
+    p.count > 0 &&
+    typeof p.firstSeenAt === "string"
+  );
+}
+
 async function readPending(env: Env): Promise<Pending | null> {
   try {
-    return await env.STATS.get<Pending>(KEY_PENDING, "json");
+    const v = await env.STATS.get<unknown>(KEY_PENDING, "json");
+    if (v === null) return null;
+    if (isPending(v)) return v;
   } catch {
-    return null;
+    // fall through to the log below
   }
+  console.error(JSON.stringify({ event: "pending_unreadable" }));
+  return null;
 }
 
 async function publish(env: Env, next: Snapshot): Promise<void> {
@@ -64,20 +83,20 @@ export async function refresh(
     if (!verdict.ok) {
       if (verdict.kind === "invalid") return fail(verdict.reason);
       // A drop may be real (transferred or deleted repo); accept it once it has repeated unchanged.
-      const fp = fingerprint(next);
+      const sig = verdict.signature;
       const old = await readPending(env);
       const pending: Pending =
-        old && old.fingerprint === fp
+        old && JSON.stringify(old.signature) === JSON.stringify(sig)
           ? { ...old, count: old.count + 1 }
-          : { fingerprint: fp, count: 1, firstSeenAt: now.toISOString() };
+          : { signature: sig, count: 1, firstSeenAt: now.toISOString() };
       if (pending.count < ACCEPT_AFTER) {
         await env.STATS.put(KEY_PENDING, JSON.stringify(pending));
         return fail(verdict.reason);
       }
+      await publish(env, next);
       console.warn(
         JSON.stringify({ event: "drop_accepted", reason: verdict.reason, count: pending.count }),
       );
-      await publish(env, next);
       return { ok: true };
     }
     await publish(env, next);

@@ -101,6 +101,10 @@ describe("validateSnapshot", () => {
       ok: false,
       reason: "issuesTotal dropped to zero",
       kind: "drop",
+      signature: [
+        ["issuesPublic", 0],
+        ["issuesTotal", 0],
+      ],
     });
   });
 
@@ -114,6 +118,7 @@ describe("validateSnapshot", () => {
         ok: false,
         reason,
         kind: "drop",
+        signature: [[field, 0]],
       });
     }
   });

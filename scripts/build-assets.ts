@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { TECH_BLOCKS } from "../src/content/tech-stack.ts";
 import { cardAssets } from "../src/render/project-card.ts";
 import { assertBlockIntegrity, blockAssets } from "../src/render/tech-block.ts";
@@ -14,6 +14,12 @@ function write(assets: { path: string; svg: string }[]): void {
 function resetDir(name: string): void {
   rmSync(new URL(name, PUBLIC), { recursive: true, force: true });
   mkdirSync(new URL(name, PUBLIC), { recursive: true });
+}
+
+// Reset everything under public/ except .gitkeep so no stray file is deployed.
+mkdirSync(PUBLIC, { recursive: true });
+for (const entry of readdirSync(PUBLIC)) {
+  if (entry !== ".gitkeep") rmSync(new URL(entry, PUBLIC), { recursive: true, force: true });
 }
 
 // Static assets bypass the Worker, so give them the same hardening headers the stats route sends.

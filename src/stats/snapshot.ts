@@ -16,7 +16,8 @@ export function buildSnapshot(raw: RawStats, fetchedAt: Date): Snapshot {
 }
 
 /** "drop" = a regression rule fired (may be legitimate); "invalid" = structurally impossible data. */
-export type Result = { ok: true } | { ok: false; reason: string; kind: "drop" | "invalid" };
+export type Result = { ok: true } | { ok: false; reason: string; kind: "invalid" }
+  | { ok: false; reason: string; kind: "drop"; signature: [string, number][] };
 
 const COUNTS = [
   "followers",
@@ -43,21 +44,7 @@ const PUBLIC = ["commitsPublic", "prsPublic", "issuesPublic"] as const;
 const ALL_TIME_FLOOR = 0.9;
 const LAST_YEAR_FLOOR = 0.5;
 
-const FINGERPRINT_FIELDS = [
-  "commitsTotal",
-  "commitsPublic",
-  "prsTotal",
-  "prsPublic",
-  "issuesTotal",
-  "issuesPublic",
-  "stars",
-  "followers",
-] as const;
-
-/** Identifies a candidate by its counters, so a repeated identical reading can be recognised. */
-export function fingerprint(s: Snapshot): string {
-  return JSON.stringify(FINGERPRINT_FIELDS.map((k) => s[k]));
-}
+type Counter = (typeof COUNTS)[number];
 
 export function validateSnapshot(next: Snapshot, prev: Snapshot | null): Result {
   if (typeof next.name !== "string" || next.name.trim() === "") {
@@ -75,25 +62,21 @@ export function validateSnapshot(next: Snapshot, prev: Snapshot | null): Result 
   }
   if (!prev) return { ok: true };
 
-  const check = (k: "commitsTotal" | (typeof ALL_TIME)[number], floor: number): Result => {
-    if (prev[k] > 0 && next[k] === 0) {
-      return { ok: false, reason: `${k} dropped to zero`, kind: "drop" };
-    }
-    if (next[k] < prev[k] * floor) {
-      return { ok: false, reason: `${k} fell from ${prev[k]} to ${next[k]}`, kind: "drop" };
-    }
-    return { ok: true };
+  // Evaluate every drop rule without short-circuiting: the signature must name all failing counters.
+  const reasons: string[] = [];
+  const signature: [string, number][] = [];
+  const flag = (k: Counter, reason: string): void => {
+    reasons.push(reason);
+    signature.push([k, next[k]]);
   };
-  for (const k of ALL_TIME) {
-    const r = check(k, ALL_TIME_FLOOR);
-    if (!r.ok) return r;
-  }
-  const commits = check("commitsTotal", LAST_YEAR_FLOOR);
-  if (!commits.ok) return commits;
-  for (const k of PUBLIC) {
-    if (prev[k] > 0 && next[k] === 0) {
-      return { ok: false, reason: `${k} dropped to zero`, kind: "drop" };
-    }
-  }
-  return { ok: true };
+  const rolling = (k: Counter, floor: number): void => {
+    if (prev[k] > 0 && next[k] === 0) flag(k, `${k} dropped to zero`);
+    else if (next[k] < prev[k] * floor) flag(k, `${k} fell from ${prev[k]} to ${next[k]}`);
+  };
+  for (const k of ALL_TIME) rolling(k, ALL_TIME_FLOOR);
+  rolling("commitsTotal", LAST_YEAR_FLOOR);
+  for (const k of PUBLIC) if (prev[k] > 0 && next[k] === 0) flag(k, `${k} dropped to zero`);
+  if (reasons.length === 0) return { ok: true };
+  signature.sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  return { ok: false, reason: reasons[0]!, kind: "drop", signature };
 }

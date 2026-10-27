@@ -15,12 +15,12 @@ const NO_NETWORK = new Error("network disabled in tests");
 const KEYS = ["stats-light.svg", "stats-dark.svg", "snapshot.json"];
 const ALL_KEYS = [...KEYS, "pending.json"];
 
-function stub(opts: { status?: number; repos?: unknown } = {}) {
+function stub(opts: { status?: number; repos?: unknown; profile?: unknown } = {}) {
   return (async (_url: RequestInfo | URL, init?: RequestInit) => {
     if (opts.status) return new Response("nope", { status: opts.status });
     const body = JSON.parse(String(init?.body)) as { query: string };
     return Response.json(
-      body.query.includes("contributionsCollection") ? profile : (opts.repos ?? repos),
+      body.query.includes("contributionsCollection") ? (opts.profile ?? profile) : (opts.repos ?? repos),
     );
   }) as typeof fetch;
 }
@@ -110,14 +110,14 @@ describe("drop recovery (pending.json)", () => {
     expect(logged).toContain("drop_accepted");
   });
 
-  it("stores fingerprint, count and firstSeenAt", async () => {
+  it("stores signature, count and firstSeenAt", async () => {
     await seed();
     quiet();
     await refresh(env, NOW, dropped());
     const p = JSON.parse((await env.STATS.get("pending.json"))!);
     expect(p.count).toBe(1);
     expect(p.firstSeenAt).toBe(NOW.toISOString());
-    expect(typeof p.fingerprint).toBe("string");
+    expect(p.signature).toEqual([["prsTotal", 100]]);
   });
 
   it("a differing candidate in between resets the count", async () => {
@@ -132,6 +132,46 @@ describe("drop recovery (pending.json)", () => {
     const res = await refresh(env, NOW, dropped(100));
     expect(res.ok).toBe(false);
     expect(JSON.parse((await env.STATS.get("snapshot.json"))!).prsTotal).toBe(237);
+  });
+
+  it("an unrelated counter changing between identical drops does not reset the count", async () => {
+    await seed();
+    quiet();
+    for (let i = 0; i < 3; i++) {
+      const p = structuredClone(profile);
+      p.data.user.followers.totalCount = 3 + i;
+      expect((await refresh(env, NOW, dropped(100, { profile: p }))).ok).toBe(false);
+    }
+    expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(3);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await refresh(env, NOW, dropped(100))).toEqual({ ok: true });
+    expect(JSON.parse((await env.STATS.get("snapshot.json"))!).prsTotal).toBe(100);
+  });
+
+  it("a second counter dropping to zero on the fourth run resets the count", async () => {
+    await seed();
+    quiet();
+    for (let i = 0; i < 3; i++) await refresh(env, NOW, dropped(100));
+    const m = structuredClone(repos);
+    m.data.user.pullRequests.totalCount = 100;
+    m.data.publicPrs.issueCount = 0;
+    const res = await refresh(env, NOW, stub({ repos: m }));
+    expect(res.ok).toBe(false);
+    expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(1);
+    expect(JSON.parse((await env.STATS.get("snapshot.json"))!).prsTotal).toBe(237);
+  });
+
+  it("a malformed pending.json is ignored, not trusted", async () => {
+    await seed();
+    const err = quiet();
+    await refresh(env, NOW, dropped(100));
+    const good = JSON.parse((await env.STATS.get("pending.json"))!);
+    await env.STATS.put("pending.json", JSON.stringify({ ...good, count: "99" }));
+    expect((await refresh(env, NOW, dropped(100))).ok).toBe(false);
+    expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(1);
+    await env.STATS.put("pending.json", "{not json");
+    expect((await refresh(env, NOW, dropped(100))).ok).toBe(false);
+    expect(JSON.stringify(err.mock.calls)).toContain("pending_unreadable");
   });
 
   it("a structural invalidity never accumulates", async () => {
@@ -206,7 +246,7 @@ describe("scheduled", () => {
 });
 
 describe("scheduled failure signalling", () => {
-  it("rejects when the refresh fails and resolves when it succeeds", async () => {
+  it("rejects when the refresh fails", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (async () => new Response("nope", { status: 401 })) as typeof fetch,
@@ -217,6 +257,17 @@ describe("scheduled failure signalling", () => {
     ).rejects.toThrow(/401/);
     await waitOnExecutionContext(ctx);
     expect(JSON.stringify(err.mock.calls)).not.toContain("test-profile");
+  });
+
+  it("resolves when the refresh succeeds", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(((u: RequestInfo | URL, init?: RequestInit) =>
+      stub()(u, init)) as typeof fetch);
+    const ctx = createExecutionContext();
+    await expect(
+      worker.scheduled(createScheduledController({ scheduledTime: NOW, cron: "0 */6 * * *" }), env, ctx),
+    ).resolves.toBeUndefined();
+    await waitOnExecutionContext(ctx);
+    expect(await env.STATS.get("snapshot.json")).not.toBeNull();
   });
 });
 
