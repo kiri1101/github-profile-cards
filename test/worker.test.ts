@@ -169,6 +169,9 @@ describe("drop recovery (pending.json)", () => {
     await env.STATS.put("pending.json", JSON.stringify({ ...good, count: "99" }));
     expect((await refresh(env, NOW, dropped(100))).ok).toBe(false);
     expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(1);
+    await env.STATS.put("pending.json", JSON.stringify({ ...good, count: 4 }));
+    expect((await refresh(env, NOW, dropped(100))).ok).toBe(false);
+    expect(JSON.parse((await env.STATS.get("pending.json"))!).count).toBe(1);
     await env.STATS.put("pending.json", "{not json");
     expect((await refresh(env, NOW, dropped(100))).ok).toBe(false);
     expect(JSON.stringify(err.mock.calls)).toContain("pending_unreadable");

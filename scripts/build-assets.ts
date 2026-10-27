@@ -1,4 +1,7 @@
+import { sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { cleanupTargets } from "./safe-paths.ts";
 import { TECH_BLOCKS } from "../src/content/tech-stack.ts";
 import { cardAssets } from "../src/render/project-card.ts";
 import { assertBlockIntegrity, blockAssets } from "../src/render/tech-block.ts";
@@ -18,8 +21,9 @@ function resetDir(name: string): void {
 
 // Reset everything under public/ except .gitkeep so no stray file is deployed.
 mkdirSync(PUBLIC, { recursive: true });
-for (const entry of readdirSync(PUBLIC)) {
-  if (entry !== ".gitkeep") rmSync(new URL(entry, PUBLIC), { recursive: true, force: true });
+// Plain filesystem paths, not URLs: URL parsing would turn names like "%2e%2e" into "..".
+for (const target of cleanupTargets(fileURLToPath(PUBLIC), readdirSync(PUBLIC), [".gitkeep"], sep)) {
+  rmSync(target, { recursive: true, force: true });
 }
 
 // Static assets bypass the Worker, so give them the same hardening headers the stats route sends.

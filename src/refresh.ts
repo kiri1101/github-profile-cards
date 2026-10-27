@@ -7,7 +7,7 @@ export const KEY_DARK = "stats-dark.svg";
 export const KEY_SNAPSHOT = "snapshot.json";
 export const KEY_PENDING = "pending.json";
 
-/** After this many identical rejected drops (24 h at the 6-hourly cron) the drop is accepted as real. */
+/** Accept after the 4th identical drop signature (about 18-24 h at the 6-hourly cron). */
 const ACCEPT_AFTER = 4;
 
 type Pending = { signature: [string, number][]; count: number; firstSeenAt: string };
@@ -39,7 +39,8 @@ function isPending(v: unknown): v is Pending {
     ) &&
     typeof p.count === "number" &&
     Number.isInteger(p.count) &&
-    p.count > 0 &&
+    p.count >= 1 &&
+    p.count < ACCEPT_AFTER &&
     typeof p.firstSeenAt === "string"
   );
 }
