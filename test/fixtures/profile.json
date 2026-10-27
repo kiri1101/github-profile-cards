@@ -1,0 +1,16 @@
+{
+  "data": {
+    "user": {
+      "name": "Jordan Tukum Folem",
+      "followers": { "totalCount": 3 },
+      "contributionsCollection": {
+        "totalCommitContributions": 1383,
+        "totalPullRequestReviewContributions": 0,
+        "commitContributionsByRepository": [
+          { "repository": { "isPrivate": false }, "contributions": { "totalCount": 200 } },
+          { "repository": { "isPrivate": false }, "contributions": { "totalCount": 46 } }
+        ]
+      }
+    }
+  }
+}

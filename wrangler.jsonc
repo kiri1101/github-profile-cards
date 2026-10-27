@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "github-profile-cards",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-27",
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+  "triggers": { "crons": ["0 */6 * * *"] },
+  "kv_namespaces": [{ "binding": "STATS", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+  "assets": { "directory": "./public" },
+  "vars": { "GITHUB_LOGIN": "kiri1101" }
+}

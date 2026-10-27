@@ -1,0 +1,23 @@
+{
+  "name": "github-profile-cards",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p scripts --noEmit",
+    "gen:metrics": "node scripts/gen-metrics.ts",
+    "vendor:icons": "node scripts/vendor-icons.ts",
+    "build": "node scripts/build-assets.ts",
+    "deploy": "npm run build && wrangler deploy",
+    "verify:tokens": "node scripts/verify-tokens.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.8",
+    "@types/node": "^26.6.5",
+    "opentype.js": "^2.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.153.0"
+  }
+}

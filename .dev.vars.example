@@ -1,0 +1,3 @@
+# Copy to .dev.vars and fill in. Never commit .dev.vars.
+GH_TOKEN_PROFILE=
+GH_TOKEN_REPOS=

@@ -1,0 +1,12 @@
+{
+  "data": {
+    "user": {
+      "pullRequests": { "totalCount": 237 },
+      "openIssues": { "totalCount": 12 },
+      "closedIssues": { "totalCount": 288 },
+      "repositories": { "nodes": [{ "stargazerCount": 0 }, { "stargazerCount": 0 }] }
+    },
+    "publicPrs": { "issueCount": 49 },
+    "publicIssues": { "issueCount": 56 }
+  }
+}
