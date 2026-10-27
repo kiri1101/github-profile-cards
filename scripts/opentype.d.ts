@@ -1,6 +1,7 @@
 declare module "opentype.js" {
   interface Glyph {
     advanceWidth?: number;
+    index: number;
   }
   interface Font {
     unitsPerEm: number;

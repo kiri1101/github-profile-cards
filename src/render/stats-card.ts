@@ -1,7 +1,8 @@
 import type { Snapshot } from "../stats/snapshot.ts";
 import { escapeXml } from "./escape.ts";
 import { FOOTER_PREFIX, formatCount, formatUpdated } from "./format.ts";
-import type { Theme } from "./measure.ts";
+import { frame } from "./frame.ts";
+import { measure, type Theme } from "./measure.ts";
 import { OCTICONS } from "./octicons.ts";
 import { FONT, STATS_PALETTE } from "./palette.ts";
 
@@ -9,6 +10,24 @@ const COLS = [330, 400, 470] as const;
 const HEADER_Y = 100;
 const ROW_GAP = 31;
 const CIRCUMFERENCE = 2 * Math.PI * 26;
+const TITLE_X = 25;
+// Ring centre 440, r 26, stroke 5 puts its left edge at 411.5; keep 12px clear of it.
+const TITLE_RIGHT = 440 - 26 - 2.5 - 12;
+const TITLE_SUFFIX = "'s GitHub Stats";
+
+/** Largest size from 18px down to 14px at which the title fits; otherwise truncate the name with an ellipsis at 14px. */
+function fitTitle(name: string): { text: string; size: number } {
+  const room = TITLE_RIGHT - TITLE_X;
+  const fits = (t: string, size: number) => measure(t, size, 600) <= room;
+  for (let size = 18; size >= 14; size -= 0.5) {
+    if (fits(name + TITLE_SUFFIX, size)) return { text: name + TITLE_SUFFIX, size };
+  }
+  let n = Array.from(name);
+  while (n.length > 0 && !fits(n.join("") + "…" + TITLE_SUFFIX, 14)) n = n.slice(0, -1);
+  return { text: n.join("") + "…" + TITLE_SUFFIX, size: 14 };
+}
+
+const privateCount = (total: number, pub: number) => Math.max(0, total - pub);
 
 export function renderStatsCard(s: Snapshot, theme: Theme): string {
   const C = STATS_PALETTE[theme];
@@ -24,21 +43,23 @@ export function renderStatsCard(s: Snapshot, theme: Theme): string {
     { icon: "star", label: "Stars earned", pub: s.stars, total: s.stars, noPrivate: true },
   ] as const;
 
-  const title = `${escapeXml(s.name)}&#39;s GitHub Stats`;
+  const fitted = fitTitle(s.name);
+  const title = escapeXml(fitted.text);
+  const percentile = Math.min(100, Math.max(0, s.percentile));
   const updated = formatUpdated(new Date(s.fetchedAt));
   const summary = rows
     .map((r) => {
-      const priv = "noPrivate" in r ? "" : `, ${formatCount(r.total - r.pub)} private`;
+      const priv = "noPrivate" in r ? "" : `, ${formatCount(privateCount(r.total, r.pub))} private`;
       return `${r.label}: ${formatCount(r.total)} total (${formatCount(r.pub)} public${priv})`;
     })
     .join(". ");
-  const a11yTitle = `${title}, Rank: ${s.level}`;
-  const a11yDesc = `${summary}. Private = private repositories, mostly client work. Updated ${updated}.`;
+  const a11yTitle = `${title}, Rank: ${escapeXml(s.level)}`;
+  const a11yDesc = `${summary}. ${FOOTER_PREFIX}${updated}.`;
 
   let body = `<title id="t">${a11yTitle}</title><desc id="d">${escapeXml(a11yDesc)}</desc>`;
-  body += text(25, 38, title, `font:600 18px ${FONT};fill:${C.title}`);
+  body += text(TITLE_X, 38, title, `font:600 ${fitted.size}px ${FONT};fill:${C.title}`);
   body += `<circle cx="440" cy="42" r="26" fill="none" stroke="${C.ring}" stroke-width="5" opacity="${C.ringTrack}"/>`;
-  body += `<circle cx="440" cy="42" r="26" fill="none" stroke="${C.ring}" stroke-width="5" stroke-linecap="round" opacity="${C.ringArc}" stroke-dasharray="${CIRCUMFERENCE}" stroke-dashoffset="${(CIRCUMFERENCE * s.percentile) / 100}" transform="rotate(-90 440 42)"/>`;
+  body += `<circle cx="440" cy="42" r="26" fill="none" stroke="${C.ring}" stroke-width="5" stroke-linecap="round" opacity="${C.ringArc}" stroke-dasharray="${CIRCUMFERENCE}" stroke-dashoffset="${(CIRCUMFERENCE * percentile) / 100}" transform="rotate(-90 440 42)"/>`;
   body += `<text x="440" y="42" text-anchor="middle" dominant-baseline="central" style="font:800 17px ${FONT};fill:${C.grade}">${escapeXml(s.level)}</text>`;
 
   ["PUBLIC", "PRIVATE", "TOTAL"].forEach((h, i) => {
@@ -52,7 +73,7 @@ export function renderStatsCard(s: Snapshot, theme: Theme): string {
     body += icon(r.icon, 25, y - 12.5, 16, C.icon);
     body += text(50, y, r.label, `font:600 14px ${FONT};fill:${C.text}`);
     body += text(COLS[0], y, formatCount(r.pub), cell, "end");
-    body += text(COLS[1], y, "noPrivate" in r ? "—" : formatCount(r.total - r.pub), cell, "end");
+    body += text(COLS[1], y, "noPrivate" in r ? "—" : formatCount(privateCount(r.total, r.pub)), cell, "end");
     body += text(COLS[2], y, formatCount(r.total), `font:700 14px ${FONT};fill:${C.title}`, "end");
   });
 
@@ -60,5 +81,5 @@ export function renderStatsCard(s: Snapshot, theme: Theme): string {
   body += icon("lock", 25, 261.5, 12, C.muted);
   body += text(42, 272, `${FOOTER_PREFIX}${updated}`, `font:400 11.5px ${FONT};fill:${C.muted}`);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="495" height="290" viewBox="0 0 495 290" role="img" aria-labelledby="t d"><rect x="0.5" y="0.5" rx="4.5" width="494" height="289" fill="${C.background}"/>${body}</svg>`;
+  return frame(C.background, "t d", body);
 }

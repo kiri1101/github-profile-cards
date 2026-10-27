@@ -19,6 +19,7 @@ for (const [weight, path] of Object.entries(FILES)) {
   const table: Record<string, number> = {};
   for (const ch of chars) {
     const glyph = font.charToGlyph(ch);
+    if (glyph.index === 0) throw new Error(`missing glyph for ${JSON.stringify(ch)} in ${path}`);
     table[ch] = (glyph.advanceWidth ?? 0) / font.unitsPerEm;
   }
   out[weight] = table;

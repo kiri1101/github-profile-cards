@@ -5,7 +5,7 @@ import { renderStatsCard } from "../src/render/stats-card.ts";
 import { renderPlaceholder } from "../src/render/placeholder.ts";
 import { FOOTER_PREFIX } from "../src/render/format.ts";
 import { measure } from "../src/render/measure.ts";
-import { CARD_PALETTE, STATS_PALETTE } from "../src/render/palette.ts";
+import { STATS_PALETTE } from "../src/render/palette.ts";
 
 const full: RawStats = {
   name: "Jordan Tukum Folem",
@@ -76,21 +76,54 @@ describe("renderStatsCard", () => {
   });
 });
 
-describe("palettes", () => {
-  it("defines the ruled card colours", () => {
-    expect(CARD_PALETTE.light).toMatchObject({ background: "#ffffff", border: "#d1d9e0", title: "#0969da", muted: "#59636e" });
-    expect(CARD_PALETTE.dark).toMatchObject({ background: "#0d1117", border: "#30363d", title: "#4493f8", muted: "#9198a1" });
-    expect(STATS_PALETTE.dark.background).toBe("#0d1117");
+describe("renderStatsCard hardening", () => {
+  const circ = 2 * Math.PI * 26;
+  const offset = (svg: string) => Number(/stroke-dashoffset="([\d.]+)"/.exec(svg)![1]);
+  const titleOf = (svg: string) => {
+    const m = /<text x="25" y="38"[^>]*font:600 ([\d.]+)px[^>]*>([^<]*)</.exec(svg)!;
+    return { size: Number(m[1]), text: m[2].replace(/&#39;/g, "'") };
+  };
+
+  it("shrinks then truncates a long name so it clears the ring", () => {
+    const svg = renderStatsCard({ ...snap, name: "Maximilian Bartholomew Montgomery-Featherstonehaugh III of Somewhere" }, "light");
+    const { size, text } = titleOf(svg);
+    expect(text).toContain("…");
+    expect(size).toBeGreaterThanOrEqual(14);
+    expect(25 + measure(text, size, 600)).toBeLessThanOrEqual(399.5);
+  });
+
+  it("keeps a normal name at 18px untruncated", () => {
+    const { size, text } = titleOf(light);
+    expect(size).toBe(18);
+    expect(text).not.toContain("…");
+  });
+
+  it("clamps the private count at zero", () => {
+    const svg = renderStatsCard({ ...snap, commitsPublic: 2000 }, "light");
+    expect(svg).toMatch(/<text x="400" y="137"[^>]*>0</);
+    expect(svg).not.toContain(">-");
+  });
+
+  it("clamps the percentile to [0, 100]", () => {
+    expect(offset(renderStatsCard({ ...snap, percentile: 150 }, "light"))).toBeCloseTo(circ, 6);
+    expect(offset(renderStatsCard({ ...snap, percentile: -5 }, "light"))).toBe(0);
+  });
+
+  it("uses the dark card palette only in dark output", () => {
+    for (const color of ["#0d1117", "#30363d", "#8b949e"]) expect(dark).toContain(color);
+    expect(light).not.toContain("#0d1117");
   });
 });
 
 describe("renderPlaceholder", () => {
-  it("is a neutral updating card, never zeros", () => {
+  it("is a neutral updating card, never numbers", () => {
     for (const theme of ["light", "dark"] as const) {
       const svg = renderPlaceholder(theme);
       expect(svg).toContain("updating");
       expect(svg).toContain(STATS_PALETTE[theme].background);
-      expect(svg).not.toContain(">0<");
+      expect(svg).toContain(STATS_PALETTE[theme].muted);
+      const content = svg.replace(/<[^>]*>/g, " ");
+      expect(content).not.toMatch(/\d/);
     }
   });
 });

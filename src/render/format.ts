@@ -11,8 +11,13 @@ const DOUALA = new Intl.DateTimeFormat("en-US", {
 
 /** "27 Oct 2026" in the Africa/Douala time zone, with a fixed English month list. */
 export function formatUpdated(d: Date): string {
-  const part = (type: string) => Number(DOUALA.formatToParts(d).find((p) => p.type === type)?.value);
-  return `${part("day")} ${MONTHS[part("month") - 1]} ${part("year")}`;
+  if (Number.isNaN(d.getTime())) throw new Error("formatUpdated: invalid Date");
+  const parts = new Map(DOUALA.formatToParts(d).map((p) => [p.type, p.value]));
+  const day = Number(parts.get("day"));
+  const month = Number(parts.get("month"));
+  const year = Number(parts.get("year"));
+  if (!day || !year || !MONTHS[month - 1]) throw new Error("formatUpdated: could not read date parts");
+  return `${day} ${MONTHS[month - 1]} ${year}`;
 }
 
 export function formatCount(n: number): string {

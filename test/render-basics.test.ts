@@ -39,6 +39,12 @@ describe("formatUpdated", () => {
   });
 });
 
+describe("formatUpdated invalid input", () => {
+  it("throws on an invalid Date", () => {
+    expect(() => formatUpdated(new Date("invalid"))).toThrow(/invalid Date/);
+  });
+});
+
 describe("formatCount", () => {
   it("groups thousands en-US", () => {
     expect(formatCount(1383)).toBe("1,383");
