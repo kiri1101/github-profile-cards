@@ -53,10 +53,11 @@ export default {
     const when = new Date(controller.scheduledTime);
     const run = Promise.allSettled([refresh(env, when), refreshLanguages(env, when)]).then((settled) => {
       const reasons: string[] = [];
-      for (const s of settled) {
-        if (s.status === "rejected") reasons.push(s.reason instanceof Error ? s.reason.message : "unknown error");
-        else if (!s.value.ok) reasons.push(s.value.reason);
-      }
+      const labels = ["stats", "languages"];
+      settled.forEach((s, i) => {
+        if (s.status === "rejected") reasons.push(`${labels[i]}: ${s.reason instanceof Error ? s.reason.message : "unknown error"}`);
+        else if (!s.value.ok) reasons.push(`${labels[i]}: ${s.value.reason}`);
+      });
       if (reasons.length > 0) throw new Error(reasons.join("; "));
     });
     ctx.waitUntil(run.catch(() => {}));

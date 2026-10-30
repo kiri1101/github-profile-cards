@@ -29,8 +29,10 @@ function stub(
   } = {},
 ) {
   return (async (_url: RequestInfo | URL, init?: RequestInit) => {
-    if (opts.status) return new Response("nope", { status: opts.status });
     const body = JSON.parse(String(init?.body)) as { query: string; variables?: { after?: string | null } };
+    const known = ["languages(first", "contributionsCollection", "publicPrs"].some((q) => body.query.includes(q));
+    if (!known) throw new Error("unexpected query in test stub");
+    if (opts.status) return new Response("nope", { status: opts.status });
     if (body.query.includes("languages(first")) {
       if (opts.langsStatus) return new Response("nope", { status: opts.langsStatus });
       const pages = opts.langPages ?? [langsPage1, langsPage2];
@@ -266,7 +268,7 @@ describe("refresh failure causes and recovery", () => {
 });
 
 describe("scheduled", () => {
-  it("scheduled() runs refresh", async () => {
+  it("scheduled() runs both the stats and the languages refresh", async () => {
     const auth: Record<string, string[]> = { profile: [], repos: [], languages: [] };
     const inner = stub();
     vi.spyOn(globalThis, "fetch").mockImplementation((async (u: RequestInfo | URL, init?: RequestInit) => {
@@ -351,8 +353,8 @@ describe("refreshLanguages", () => {
     const err = quietErr();
     const result = await runScheduled(stub({ statsStatus: 401, langsStatus: 500 }));
     expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toContain("401");
-    expect((result as Error).message).toContain("500");
+    expect((result as Error).message).toMatch(/stats: .*401/);
+    expect((result as Error).message).toMatch(/languages: .*500/);
     for (const k of [...KEYS, ...LANG_KEYS]) expect(await env.STATS.get(k)).toBe(`old-${k}`);
     const logged = JSON.stringify(err.mock.calls);
     expect(logged).toContain("refresh_failed");
@@ -369,6 +371,8 @@ describe("refreshLanguages", () => {
       return inner(u, init);
     }) as typeof fetch);
     expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toMatch(/^languages: /);
+    expect((result as Error).message).not.toContain("stats:");
     expect(calls).toContain("langs");
     expect(calls).toContain("stats");
     expect(await env.STATS.get("snapshot.json")).not.toBeNull();
