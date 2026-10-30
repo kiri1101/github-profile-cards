@@ -1,0 +1,27 @@
+{
+  "data": {
+    "user": {
+      "repositories": {
+        "pageInfo": { "hasNextPage": false, "endCursor": "c2" },
+        "nodes": [
+          {
+            "languages": {
+              "edges": [
+                { "size": 2000, "node": { "name": "Vue", "color": "#41b883" } },
+                { "size": 500, "node": { "name": "C#", "color": null } }
+              ]
+            }
+          },
+          {
+            "languages": {
+              "edges": [
+                { "size": 1000, "node": { "name": "PHP", "color": "#4F5D95" } },
+                { "size": 1500, "node": { "name": "TypeScript", "color": "#3178c6" } }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

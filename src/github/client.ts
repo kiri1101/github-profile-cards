@@ -75,11 +75,11 @@ type ReposData = {
   publicIssues: { issueCount: number };
 };
 
-async function graphql<T>(
+export async function graphql<T>(
   fetchFn: typeof fetch,
   token: string,
   query: string,
-  variables: Record<string, string>,
+  variables: Record<string, string | null>,
 ): Promise<T> {
   const res = await fetchFn(ENDPOINT, {
     method: "POST",
