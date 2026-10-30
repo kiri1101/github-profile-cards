@@ -36,10 +36,15 @@ function stub(
       const pages = opts.langPages ?? [langsPage1, langsPage2];
       return Response.json(body.variables?.after ? pages[1] : pages[0]);
     }
-    if (opts.statsStatus) return new Response("nope", { status: opts.statsStatus });
-    return Response.json(
-      body.query.includes("contributionsCollection") ? (opts.profile ?? profile) : (opts.repos ?? repos),
-    );
+    if (body.query.includes("contributionsCollection")) {
+      if (opts.statsStatus) return new Response("nope", { status: opts.statsStatus });
+      return Response.json(opts.profile ?? profile);
+    }
+    if (body.query.includes("publicPrs")) {
+      if (opts.statsStatus) return new Response("nope", { status: opts.statsStatus });
+      return Response.json(opts.repos ?? repos);
+    }
+    throw new Error("unexpected query in test stub");
   }) as typeof fetch;
 }
 
@@ -262,10 +267,12 @@ describe("refresh failure causes and recovery", () => {
 
 describe("scheduled", () => {
   it("scheduled() runs refresh", async () => {
-    const auth: string[] = [];
+    const auth: Record<string, string[]> = { profile: [], repos: [], languages: [] };
     const inner = stub();
     vi.spyOn(globalThis, "fetch").mockImplementation((async (u: RequestInfo | URL, init?: RequestInit) => {
-      auth.push(new Headers(init?.headers).get("Authorization") ?? "");
+      const q = (JSON.parse(String(init?.body)) as { query: string }).query;
+      const type = q.includes("languages(first") ? "languages" : q.includes("contributionsCollection") ? "profile" : "repos";
+      auth[type]!.push(new Headers(init?.headers).get("Authorization") ?? "");
       return inner(u, init);
     }) as typeof fetch);
     const ctx = createExecutionContext();
@@ -276,7 +283,9 @@ describe("scheduled", () => {
     );
     await waitOnExecutionContext(ctx);
     expect(await env.STATS.get("stats-dark.svg")).not.toBeNull();
-    expect([...new Set(auth)].sort()).toEqual(["bearer test-profile", "bearer test-repos"]);
+    expect(auth.profile).toEqual(["bearer test-profile"]);
+    expect(auth.repos).toEqual(["bearer test-repos"]);
+    expect(auth.languages).toEqual(["bearer test-repos", "bearer test-repos"]); // two fixture pages
     expect(await env.STATS.get("langs-dark.svg")).not.toBeNull();
   });
 });
@@ -335,6 +344,19 @@ describe("refreshLanguages", () => {
     expect(await runScheduled(stub({ statsStatus: 401 }))).toBeInstanceOf(Error);
     expect(await env.STATS.get("langs-light.svg")).toContain(">Most Used Languages<");
     for (const k of KEYS) expect(await env.STATS.get(k)).toBe(`old-${k}`);
+  });
+
+  it("scheduled() rejects with both reasons when both refreshes fail, leaving all keys unchanged", async () => {
+    for (const k of [...KEYS, ...LANG_KEYS]) await env.STATS.put(k, `old-${k}`);
+    const err = quietErr();
+    const result = await runScheduled(stub({ statsStatus: 401, langsStatus: 500 }));
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain("401");
+    expect((result as Error).message).toContain("500");
+    for (const k of [...KEYS, ...LANG_KEYS]) expect(await env.STATS.get(k)).toBe(`old-${k}`);
+    const logged = JSON.stringify(err.mock.calls);
+    expect(logged).toContain("refresh_failed");
+    expect(logged).toContain("langs_refresh_failed");
   });
 
   it("scheduled() rejects when either refresh fails, after both have run", async () => {

@@ -17,6 +17,12 @@ type Pending = { signature: [string, number][]; count: number; firstSeenAt: stri
 
 export type RefreshResult = { ok: true } | { ok: false; reason: string };
 
+/** Only the HTTP status or error message is surfaced; GitHubError messages never contain tokens (status alone would lose GraphQL causes, which arrive as HTTP 200). */
+function describeError(e: unknown): string {
+  if (e instanceof GitHubError) return e.status !== null ? `GitHub HTTP ${e.status}: ${e.message}` : e.message;
+  return e instanceof Error ? e.message : "unknown error";
+}
+
 function fail(reason: string): RefreshResult {
   console.error(JSON.stringify({ event: "refresh_failed", reason }));
   return { ok: false, reason };
@@ -106,12 +112,7 @@ export async function refresh(
     await publish(env, next);
     return { ok: true };
   } catch (e) {
-    // Only the HTTP status or error message is logged; tokens never appear in either.
-    if (e instanceof GitHubError) {
-      // GitHubError messages never contain tokens; status alone loses the cause (GraphQL errors are HTTP 200).
-      return fail(e.status !== null ? `GitHub HTTP ${e.status}: ${e.message}` : e.message);
-    }
-    return fail(e instanceof Error ? e.message : "unknown error");
+    return fail(describeError(e));
   }
 }
 
@@ -143,9 +144,6 @@ export async function refreshLanguages(
     await env.STATS.put(KEY_LANGS, JSON.stringify(next));
     return { ok: true };
   } catch (e) {
-    if (e instanceof GitHubError) {
-      return langsFail(e.status !== null ? `GitHub HTTP ${e.status}: ${e.message}` : e.message);
-    }
-    return langsFail(e instanceof Error ? e.message : "unknown error");
+    return langsFail(describeError(e));
   }
 }
