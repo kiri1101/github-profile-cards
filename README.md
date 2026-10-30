@@ -1,15 +1,16 @@
 # github-profile-cards
 
-A small Cloudflare Worker that powers a GitHub profile README: a self-hosted stats card (light and dark), plus project cards and tech-stack blocks, all as SVG.
+A small Cloudflare Worker that powers a GitHub profile README: a self-hosted stats card and a most-used-languages card (both light and dark), plus project cards and tech-stack blocks, all as SVG.
 
 ## Why self-hosted
 
-Public stats widgets only see public activity. A freelancer's client work lives in private repositories, so those cards undercount. This Worker uses two read-only tokens so the commit, pull request and issue totals include private work. The letter grade uses the `calculateRank` formula from github-readme-stats.
+Public stats widgets only see public activity. A freelancer's client work lives in private repositories, so those cards undercount. This Worker uses two read-only tokens so the commit, pull request and issue totals include private work. The letter grade uses the `calculateRank` formula from github-readme-stats. The languages card adds up the language bytes of every repository you own, private ones included, forks excluded.
 
 ## What it does
 
 - **Cron Trigger every 6 hours** (00, 06, 12, 18 UTC): fetches the stats from GitHub with both tokens, validates the result against the last stored snapshot, renders the light and dark cards and writes them to Workers KV. If a fetch or validation fails, nothing is overwritten: the card keeps its last good version and a `refresh_failed` event is logged.
-- **Fetch handler** serves only the two stats images from KV. It never calls GitHub.
+- **Languages refresh, same cron:** sums GitHub's language bytes over the owned, non-fork repositories (public and private, following pagination) with `GH_TOKEN_REPOS`, keeps the top 6, and writes `langs-light.svg`, `langs-dark.svg` and `langs.json` to KV. It runs independently of the stats refresh: one failing never blocks or rolls back the other, each keeps its own last good card, and the languages refresh logs its own `langs_refresh_failed` event. If either one fails, the scheduled run is still marked as failed in Cloudflare's Cron events.
+- **Fetch handler** serves only the stats and languages images from KV. It never calls GitHub.
 - **Static assets** (project cards and tech-stack blocks) are generated at build time by `npm run build` and served as Workers static assets.
 
 ## Endpoints and assets
@@ -17,10 +18,11 @@ Public stats widgets only see public activity. A freelancer's client work lives 
 | Path | Source |
 | --- | --- |
 | `/stats-light.svg`, `/stats-dark.svg` | KV, `GET` and `HEAD` only. Before the first refresh, a placeholder "updating" card is served. |
+| `/langs-light.svg`, `/langs-dark.svg` | KV, `GET` and `HEAD` only, same headers as the stats images. A 300×165 "Most Used Languages" card (top 6, percentages, footer "Incl. private repositories · updated {date}"). Before the first refresh, a placeholder "Languages are updating" card is served. |
 | `/cards/<project>.svg` | Static assets (`public/cards/`), one self-theming SVG per project |
 | `/stack/<group>.svg` | Static assets (`public/stack/`) |
 
-The stats endpoints take no parameters (a query string is ignored). Any other path under the Worker that is not a static asset returns 404; other methods on the stats paths return 405.
+The stats and languages endpoints take no parameters (a query string is ignored). Any other path under the Worker that is not a static asset returns 404; other methods on these paths return 405.
 
 ## Tokens
 
@@ -29,7 +31,7 @@ Two tokens, both read-only, set as Worker secrets:
 | Secret | Type | Settings | Used for |
 | --- | --- | --- | --- |
 | `GH_TOKEN_PROFILE` | Classic personal access token | Scope `read:user` only | Commit totals including private contributions |
-| `GH_TOKEN_REPOS` | Fine-grained personal access token | Resource owner: the profile owner. Repository access: all repositories. Permissions: Issues (read-only) and Pull requests (read-only). Metadata (read-only) is added automatically. | Pull request and issue counts including private repositories |
+| `GH_TOKEN_REPOS` | Fine-grained personal access token | Resource owner: the profile owner. Repository access: all repositories. Permissions: Issues (read-only) and Pull requests (read-only). Metadata (read-only) is added automatically and also covers repository languages. | Pull request and issue counts, and language totals, including private repositories |
 
 Why two: the private-inclusive contribution (commit) totals are only available through a classic token with `read:user`; fine-grained tokens can read private pull requests and issues but not those totals. A single classic token with `repo` could cover everything, but it is write-capable, so it is not used. Neither of the two tokens can write.
 
@@ -69,6 +71,15 @@ The Worker is then live at `https://github-profile-cards.<your-subdomain>.worker
 </picture>
 ```
 
+The languages card is not linked, so it takes `<picture>` the same way. It is 300×165, so set `height="165"`:
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://<worker-url>/langs-dark.svg">
+  <img alt="Most used languages" src="https://<worker-url>/langs-light.svg" height="165">
+</picture>
+```
+
 Project cards are linked, so they are a plain `<a><img></a>`. Each card is one self-theming SVG: it carries both palettes and switches with the visitor's OS/browser colour preference through its own `@media (prefers-color-scheme: dark)` rule. Do not wrap a linked image in `<picture>` on GitHub: the README renderer splits `<a><picture><source><img></picture></a>`, putting the `<img>` in its own link to the raw image outside your anchor and dropping the `<img>` from the `<picture>`, so the click goes to the image and dark switching breaks.
 
 ```html
@@ -103,11 +114,13 @@ npx wrangler kv key delete snapshot.json --binding STATS --remote
 
 Wrangler 4 KV commands default to local storage, hence `--remote`.
 
+**The languages card shows a language you did not expect (for example a large JavaScript share).** GitHub counts committed build output and vendored bundles (such as a Nuxt `.output/` folder or `dist/`) in its language bytes. The fix is in the source repositories, not the Worker: add the folder to `.gitignore` (and untrack it with `git rm -r --cached`), or mark it in `.gitattributes`, for example `.output/** linguist-vendored`. The card follows on the next 6-hourly refresh once GitHub recalculates.
+
 ## Security notes
 
 - Tokens exist only as Worker secrets (and in your local, git-ignored `.dev.vars`). Never put them in `vars`, `wrangler.jsonc` or git.
-- The stats endpoint has no parameters and never calls GitHub; it only reads KV. Only the cron job talks to GitHub.
-- Accepted risk: the Worker URL is public, so direct requests could exhaust the free plan's 100k script requests per day. If that happens the stats card is down until 00:00 UTC; static assets (project cards, stack blocks) are not affected. The upgrade path is a custom domain plus a rate-limiting rule.
+- The stats and languages endpoints have no parameters and never call GitHub; they only read KV. Only the cron job talks to GitHub.
+- Accepted risk: the Worker URL is public, so direct requests could exhaust the free plan's 100k script requests per day. If that happens the stats and languages cards are down until 00:00 UTC; static assets (project cards, stack blocks) are not affected. The upgrade path is a custom domain plus a rate-limiting rule.
 
 ## Credits and licences
 
