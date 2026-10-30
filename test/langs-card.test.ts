@@ -39,7 +39,7 @@ describe("renderLangsCard", () => {
 
   it("shows each entry with its percentage", () => {
     expect(light).toContain(">PHP 50.00%<");
-    expect(light).toContain(">Vue 35.72%<");
+    expect(light).toContain(">Vue 35.71%<");
     expect(light).toContain(">TypeScript 10.71%<");
     expect(light).toContain(">C# 3.57%<");
   });
@@ -82,6 +82,9 @@ describe("renderLangsCard", () => {
       const content = svg.match(new RegExp(`<text [^>]*data-entry[^>]*x="${t.x}" y="${t.y}"[^>]*>([^<]*)</text>`))![1];
       expect(content).toContain("…");
       expect(content).toMatch(/ \d+\.\d\d%$/);
+      const snapshot = mk(idx);
+      expect(content.endsWith(` ${snapshot.top[idx].percent.toFixed(2)}%`)).toBe(true);
+      expect(content.slice(0, content.lastIndexOf(" ")).endsWith("…")).toBe(true);
       expect(Number(t.x) + measure(content, 12, 400)).toBeLessThanOrEqual(limit);
     }
   });

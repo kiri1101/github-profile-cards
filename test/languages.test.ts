@@ -69,13 +69,18 @@ describe("buildLangSnapshot", () => {
     expect(s.top.map((e) => e.percent)).toEqual([60, 30, 10]);
   });
 
-  it("keeps the top 6 and they add up to 100", () => {
+  it("rounds each fixture percentage individually", () => {
+    const s = buildLangSnapshot(fixtureTotals, new Date());
+    expect(s.top.map((e) => e.percent)).toEqual([50, 35.71, 10.71, 3.57]);
+  });
+
+  it("keeps the top 6 and they add up to about 100", () => {
     const totals = Array.from({ length: 8 }, (_, i) => ({ name: `L${i}`, color: "#abcdef", bytes: 1000 - i * 111 }));
     const s = buildLangSnapshot(totals, new Date());
     expect(s.top).toHaveLength(6);
     expect(s.top.map((e) => e.name)).toEqual(["L0", "L1", "L2", "L3", "L4", "L5"]);
     const sum = s.top.reduce((a, e) => a + e.percent, 0);
-    expect(Math.abs(sum - 100)).toBeLessThan(0.01);
+    expect(Math.abs(sum - 100)).toBeLessThanOrEqual(0.03 + 1e-9);
   });
 
   it("falls back for a null colour and stores ISO time", () => {

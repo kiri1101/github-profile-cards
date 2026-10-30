@@ -1,6 +1,7 @@
 import type { LangSnapshot } from "../stats/languages.ts";
 import { escapeXml } from "./escape.ts";
 import { formatUpdated } from "./format.ts";
+import { frame } from "./frame.ts";
 import { measure, type Theme } from "./measure.ts";
 import { FONT, STATS_PALETTE } from "./palette.ts";
 
@@ -18,10 +19,7 @@ const COL_LIMIT = [154, 275] as const;
 const ROW_Y = [72, 97, 122] as const;
 const TEXT_OFFSET = 15;
 
-function frame(theme: Theme, labelledBy: string, content: string): string {
-  const C = STATS_PALETTE[theme];
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${labelledBy}"><rect x="0.5" y="0.5" rx="4.5" width="${W - 1}" height="${H - 1}" fill="${C.background}"/>${content}</svg>`;
-}
+const SIZE = { width: W, height: H };
 
 /** Shorten only the language name (with an ellipsis) until "name pct%" fits `room` px at 12px; the percentage is never cut. */
 function fitEntry(name: string, pct: string, room: number): string {
@@ -63,15 +61,16 @@ export function renderLangsCard(s: LangSnapshot, theme: Theme): string {
   });
 
   body += `<text x="25" y="152" style="font:400 10.5px ${FONT};fill:${C.muted}">${LANGS_FOOTER_PREFIX}${updated}</text>`;
-  return frame(theme, "t d", body);
+  return frame(C.background, "t d", body, SIZE);
 }
 
 /** Neutral card served before the first successful refresh: never zeros. */
 export function renderLangsPlaceholder(theme: Theme): string {
   const C = STATS_PALETTE[theme];
   return frame(
-    theme,
+    C.background,
     "t",
     `<title id="t">Languages are updating</title><text x="${W / 2}" y="${H / 2}" text-anchor="middle" dominant-baseline="central" style="font:400 14px ${FONT};fill:${C.muted}">Languages are updating</text>`,
+    SIZE,
   );
 }
