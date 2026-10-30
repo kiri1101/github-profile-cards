@@ -1,4 +1,4 @@
-import { graphql } from "./client.ts";
+import { GitHubError, graphql } from "./client.ts";
 
 export type LanguageTotal = { name: string; color: string | null; bytes: number };
 
@@ -24,8 +24,14 @@ type LangsData = {
   } | null;
 };
 
-// 100 repos per page; 50 pages is far beyond any real account and bounds a runaway cursor loop.
-const MAX_PAGES = 50;
+// 100 repos per page. 20 pages (2,000 repos) is sized to the free plan's 50-subrequest budget per
+// invocation (shared with the stats requests), so the cap can actually trigger before the platform limit.
+const MAX_PAGES = 20;
+
+/** Biggest first; equal bytes are ordered by name so the order never depends on API ordering. */
+export function sortTotals(totals: LanguageTotal[]): LanguageTotal[] {
+  return [...totals].sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
+}
 
 /** Bytes per language across all owned, non-fork repositories (private and archived included), biggest first. */
 export async function fetchLanguageTotals(
@@ -35,6 +41,7 @@ export async function fetchLanguageTotals(
 ): Promise<LanguageTotal[]> {
   const totals = new Map<string, LanguageTotal>();
   let after: string | null = null;
+  const seen = new Set<string>();
   for (let page = 0; page < MAX_PAGES; page++) {
     const data: LangsData = await graphql<LangsData>(fetchFn, token, LANGS_QUERY, { login, after });
     if (!data.user) throw new Error(`GitHub user "${login}" not found in response`);
@@ -51,10 +58,12 @@ export async function fetchLanguageTotals(
         }
       }
     }
-    if (!repos.pageInfo.hasNextPage || !repos.pageInfo.endCursor) {
-      return [...totals.values()].sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
-    }
-    after = repos.pageInfo.endCursor;
+    if (!repos.pageInfo.hasNextPage) return sortTotals([...totals.values()]);
+    const cursor = repos.pageInfo.endCursor;
+    if (!cursor) throw new GitHubError("GitHub pagination cursor missing while more pages remain");
+    if (seen.has(cursor)) throw new GitHubError("GitHub pagination cursor repeated");
+    seen.add(cursor);
+    after = cursor;
   }
   throw new Error(`GitHub repositories exceeded ${MAX_PAGES} pages`);
 }

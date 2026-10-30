@@ -1,4 +1,4 @@
-import type { LanguageTotal } from "../github/languages.ts";
+import { sortTotals, type LanguageTotal } from "../github/languages.ts";
 
 export type LangEntry = { name: string; color: string; percent: number };
 export type LangSnapshot = { top: LangEntry[]; fetchedAt: string };
@@ -6,9 +6,9 @@ export type LangSnapshot = { top: LangEntry[]; fetchedAt: string };
 export const FALLBACK_COLOR = "#8b949e";
 const TOP = 6;
 
-/** Top 6 by bytes; percentages are shares of those six, each rounded individually to 2 decimals (the six may total 99.99 to 100.01). */
+/** Top 6 by bytes; percentages are shares of those six, each rounded individually to 2 decimals (the six may total 99.98 to 100.03). */
 export function buildLangSnapshot(totals: LanguageTotal[], fetchedAt: Date): LangSnapshot {
-  const top = [...totals].sort((a, b) => b.bytes - a.bytes).slice(0, TOP);
+  const top = sortTotals(totals).slice(0, TOP);
   const sum = top.reduce((a, t) => a + t.bytes, 0);
   return {
     top: top.map((t) => ({

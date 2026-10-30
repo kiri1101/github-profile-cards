@@ -13,7 +13,9 @@ function stub(pages: Response[] = [Response.json(page1), Response.json(page2)]) 
   const fetchFn = (async (_url: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { query: string; variables: Call["variables"] };
     calls.push({ query: body.query, variables: body.variables, headers: new Headers(init?.headers) });
-    return pages[Math.min(i++, pages.length - 1)];
+    const next = pages[i++];
+    if (!next) throw new Error("unexpected extra request in test stub");
+    return next;
   }) as typeof fetch;
   return { fetchFn, calls };
 }
@@ -41,6 +43,34 @@ describe("fetchLanguageTotals", () => {
     expect(calls[0].query).toContain("isFork: false");
     expect(calls[0].query).toContain("ownerAffiliations: OWNER");
     expect(calls[0].query).toContain("orderBy: {field: SIZE, direction: DESC}");
+  });
+
+  it("ignores a null languages block and a null repo node", async () => {
+    const page = (hasNext: boolean, cursor: string | null, nodes: unknown[]) =>
+      Response.json({ data: { user: { repositories: { pageInfo: { hasNextPage: hasNext, endCursor: cursor }, nodes } } } });
+    const { fetchFn } = stub([
+      page(false, null, [null, { languages: null }, { languages: { edges: [{ size: 10, node: { name: "Go", color: null } }] } }]),
+    ]);
+    expect(await fetchLanguageTotals("kiri1101", "t", fetchFn)).toEqual([{ name: "Go", color: null, bytes: 10 }]);
+  });
+
+  it("throws when GitHub says there is a next page but gives no cursor", async () => {
+    const { fetchFn } = stub([
+      Response.json({ data: { user: { repositories: { pageInfo: { hasNextPage: true, endCursor: null }, nodes: [] } } } }),
+    ]);
+    const err = await fetchLanguageTotals("kiri1101", "t", fetchFn).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubError);
+    expect((err as Error).message).toContain("pagination cursor missing");
+  });
+
+  it("throws when a cursor repeats", async () => {
+    const same = () =>
+      Response.json({ data: { user: { repositories: { pageInfo: { hasNextPage: true, endCursor: "loop" }, nodes: [] } } } });
+    const { fetchFn, calls } = stub([same(), same(), same()]);
+    const err = await fetchLanguageTotals("kiri1101", "t", fetchFn).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubError);
+    expect((err as Error).message).toContain("cursor repeated");
+    expect(calls).toHaveLength(2);
   });
 
   it("throws GitHubError on HTTP 401", async () => {
@@ -81,6 +111,15 @@ describe("buildLangSnapshot", () => {
     expect(s.top.map((e) => e.name)).toEqual(["L0", "L1", "L2", "L3", "L4", "L5"]);
     const sum = s.top.reduce((a, e) => a + e.percent, 0);
     expect(Math.abs(sum - 100)).toBeLessThanOrEqual(0.03 + 1e-9);
+  });
+
+  it("breaks byte ties by name so the sixth place does not depend on input order", () => {
+    const base = ["A", "B", "C", "D", "E"].map((name) => ({ name, color: "#111111", bytes: 1000 }));
+    const x = { name: "X", color: "#222222", bytes: 500 };
+    const y = { name: "Y", color: "#333333", bytes: 500 };
+    for (const totals of [[...base, x, y], [...base, y, x], [y, x, ...base]]) {
+      expect(buildLangSnapshot(totals, new Date()).top.map((e) => e.name)).toEqual(["A", "B", "C", "D", "E", "X"]);
+    }
   });
 
   it("falls back for a null colour and stores ISO time", () => {
