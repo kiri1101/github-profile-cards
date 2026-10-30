@@ -6,23 +6,55 @@ import {
 } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index.ts";
-import { refresh } from "../src/refresh.ts";
+import { refresh, refreshLanguages } from "../src/refresh.ts";
 import profile from "./fixtures/profile.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
+import langsPage1 from "./fixtures/langs-page1.json" with { type: "json" };
+import langsPage2 from "./fixtures/langs-page2.json" with { type: "json" };
 
 const NOW = new Date("2026-10-27T06:00:00Z");
 const NO_NETWORK = new Error("network disabled in tests");
 const KEYS = ["stats-light.svg", "stats-dark.svg", "snapshot.json"];
-const ALL_KEYS = [...KEYS, "pending.json"];
+const LANG_KEYS = ["langs-light.svg", "langs-dark.svg", "langs.json"];
+const ALL_KEYS = [...KEYS, "pending.json", ...LANG_KEYS];
 
-function stub(opts: { status?: number; repos?: unknown; profile?: unknown } = {}) {
+function stub(
+  opts: {
+    status?: number;
+    statsStatus?: number;
+    langsStatus?: number;
+    repos?: unknown;
+    profile?: unknown;
+    langPages?: unknown[];
+  } = {},
+) {
   return (async (_url: RequestInfo | URL, init?: RequestInit) => {
     if (opts.status) return new Response("nope", { status: opts.status });
-    const body = JSON.parse(String(init?.body)) as { query: string };
+    const body = JSON.parse(String(init?.body)) as { query: string; variables?: { after?: string | null } };
+    if (body.query.includes("languages(first")) {
+      if (opts.langsStatus) return new Response("nope", { status: opts.langsStatus });
+      const pages = opts.langPages ?? [langsPage1, langsPage2];
+      return Response.json(body.variables?.after ? pages[1] : pages[0]);
+    }
+    if (opts.statsStatus) return new Response("nope", { status: opts.statsStatus });
     return Response.json(
       body.query.includes("contributionsCollection") ? (opts.profile ?? profile) : (opts.repos ?? repos),
     );
   }) as typeof fetch;
+}
+
+async function runScheduled(fetchFn: typeof fetch) {
+  vi.spyOn(globalThis, "fetch").mockImplementation(((u: RequestInfo | URL, init?: RequestInit) =>
+    fetchFn(u, init)) as typeof fetch);
+  const ctx = createExecutionContext();
+  const result = await Promise.resolve(
+    worker.scheduled(createScheduledController({ scheduledTime: NOW, cron: "0 */6 * * *" }), env, ctx),
+  ).then(
+    () => "resolved" as unknown,
+    (e: unknown) => e,
+  );
+  await waitOnExecutionContext(ctx);
+  return result;
 }
 
 async function clearKv() {
@@ -244,16 +276,15 @@ describe("scheduled", () => {
     );
     await waitOnExecutionContext(ctx);
     expect(await env.STATS.get("stats-dark.svg")).not.toBeNull();
-    expect(auth.sort()).toEqual(["bearer test-profile", "bearer test-repos"]);
+    expect([...new Set(auth)].sort()).toEqual(["bearer test-profile", "bearer test-repos"]);
+    expect(await env.STATS.get("langs-dark.svg")).not.toBeNull();
   });
 });
 
 describe("scheduled failure signalling", () => {
   it("rejects when the refresh fails", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      (async () => new Response("nope", { status: 401 })) as typeof fetch,
-    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(stub({ statsStatus: 401 }));
     const ctx = createExecutionContext();
     await expect(
       worker.scheduled(createScheduledController({ scheduledTime: NOW, cron: "0 */6 * * *" }), env, ctx),
@@ -271,6 +302,124 @@ describe("scheduled failure signalling", () => {
     ).resolves.toBeUndefined();
     await waitOnExecutionContext(ctx);
     expect(await env.STATS.get("snapshot.json")).not.toBeNull();
+    expect(await env.STATS.get("langs.json")).not.toBeNull();
+  });
+});
+
+const quietErr = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+describe("refreshLanguages", () => {
+  it("writes both SVGs and langs.json", async () => {
+    expect(await refreshLanguages(env, NOW, stub())).toEqual({ ok: true });
+    const light = await env.STATS.get("langs-light.svg");
+    expect(light).toContain(">Most Used Languages<");
+    expect(light).toContain("PHP");
+    expect(await env.STATS.get("langs-dark.svg")).toContain("PHP");
+    expect(JSON.parse((await env.STATS.get("langs.json"))!).top).toHaveLength(4);
+  });
+
+  it("a languages failure keeps the last good languages images and does not touch stats", async () => {
+    for (const k of LANG_KEYS) await env.STATS.put(k, `old-${k}`);
+    const err = quietErr();
+    expect(await runScheduled(stub({ langsStatus: 401 }))).toBeInstanceOf(Error);
+    for (const k of LANG_KEYS) expect(await env.STATS.get(k)).toBe(`old-${k}`);
+    expect(JSON.stringify(err.mock.calls)).toContain("langs_refresh_failed");
+    expect(JSON.stringify(err.mock.calls)).not.toContain("test-repos");
+    expect(await env.STATS.get("stats-light.svg")).toContain(">1,383<");
+    expect(await env.STATS.get("snapshot.json")).not.toBeNull();
+  });
+
+  it("a stats failure does not block languages", async () => {
+    for (const k of KEYS) await env.STATS.put(k, `old-${k}`);
+    quietErr();
+    expect(await runScheduled(stub({ statsStatus: 401 }))).toBeInstanceOf(Error);
+    expect(await env.STATS.get("langs-light.svg")).toContain(">Most Used Languages<");
+    for (const k of KEYS) expect(await env.STATS.get(k)).toBe(`old-${k}`);
+  });
+
+  it("scheduled() rejects when either refresh fails, after both have run", async () => {
+    quietErr();
+    const calls: string[] = [];
+    const inner = stub({ langsStatus: 500 });
+    const result = await runScheduled((async (u: RequestInfo | URL, init?: RequestInit) => {
+      const q = (JSON.parse(String(init?.body)) as { query: string }).query;
+      calls.push(q.includes("languages(first") ? "langs" : "stats");
+      return inner(u, init);
+    }) as typeof fetch);
+    expect(result).toBeInstanceOf(Error);
+    expect(calls).toContain("langs");
+    expect(calls).toContain("stats");
+    expect(await env.STATS.get("snapshot.json")).not.toBeNull();
+  });
+
+  it("invalid totals (all repos empty) keep the last good images", async () => {
+    for (const k of LANG_KEYS) await env.STATS.put(k, `old-${k}`);
+    const err = quietErr();
+    const empty = {
+      data: {
+        user: {
+          repositories: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{ languages: { edges: [] } }],
+          },
+        },
+      },
+    };
+    const res = await refreshLanguages(env, NOW, stub({ langPages: [empty, empty] }));
+    expect(res.ok).toBe(false);
+    for (const k of LANG_KEYS) expect(await env.STATS.get(k)).toBe(`old-${k}`);
+    expect(JSON.stringify(err.mock.calls)).toContain("langs_refresh_failed");
+  });
+});
+
+describe("languages routes", () => {
+  const HEADERS: [string, string][] = [
+    ["Content-Type", "image/svg+xml; charset=utf-8"],
+    ["X-Content-Type-Options", "nosniff"],
+    ["Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'"],
+  ];
+
+  it("GET /langs-dark.svg?x=1 serves the dark card", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
+    await env.STATS.put("langs-dark.svg", "<svg>ldark</svg>");
+    await env.STATS.put("langs-light.svg", "<svg>llight</svg>");
+    const res = await get("/langs-dark.svg?x=1");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("<svg>ldark</svg>");
+    for (const [k, v] of HEADERS) expect(res.headers.get(k)).toBe(v);
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=3600");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("empty KV serves the languages placeholder with no-cache", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
+    const res = await get("/langs-light.svg");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Languages are updating");
+    expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    for (const [k, v] of HEADERS) expect(res.headers.get(k)).toBe(v);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("a throwing KV read serves the placeholder with no-store", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(NO_NETWORK);
+    quietErr();
+    const broken = { ...env, STATS: { get: async () => { throw new Error("kv down"); } } } as unknown as Env;
+    const request = new Request("https://x.test/langs-dark.svg") as Request<unknown, IncomingRequestCfProperties>;
+    const res = await worker.fetch(request, broken);
+    expect(await res.text()).toContain("Languages are updating");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("HEAD has no body, POST is 405, trailing slash is 404", async () => {
+    await env.STATS.put("langs-light.svg", "<svg>l</svg>");
+    const head = await get("/langs-light.svg", { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    const post = await get("/langs-light.svg", { method: "POST" });
+    expect(post.status).toBe(405);
+    expect(post.headers.get("Allow")).toBe("GET, HEAD");
+    expect((await get("/langs-light.svg/")).status).toBe(404);
   });
 });
 

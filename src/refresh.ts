@@ -1,4 +1,7 @@
 import { fetchRawStats, GitHubError } from "./github/client.ts";
+import { fetchLanguageTotals } from "./github/languages.ts";
+import { renderLangsCard } from "./render/langs-card.ts";
+import { buildLangSnapshot, validateLangTotals } from "./stats/languages.ts";
 import { renderStatsCard } from "./render/stats-card.ts";
 import { buildSnapshot, validateSnapshot, type Snapshot } from "./stats/snapshot.ts";
 
@@ -109,5 +112,40 @@ export async function refresh(
       return fail(e.status !== null ? `GitHub HTTP ${e.status}: ${e.message}` : e.message);
     }
     return fail(e instanceof Error ? e.message : "unknown error");
+  }
+}
+
+export const KEY_LANGS_LIGHT = "langs-light.svg";
+export const KEY_LANGS_DARK = "langs-dark.svg";
+export const KEY_LANGS = "langs.json";
+
+function langsFail(reason: string): RefreshResult {
+  console.error(JSON.stringify({ event: "langs_refresh_failed", reason }));
+  return { ok: false, reason };
+}
+
+/** Independent of the stats refresh: shares no keys and no state, and writes nothing unless the data validates. */
+export async function refreshLanguages(
+  env: Env,
+  now: Date,
+  fetchFn: typeof fetch = fetch,
+): Promise<RefreshResult> {
+  try {
+    const totals = await fetchLanguageTotals(env.GITHUB_LOGIN, env.GH_TOKEN_REPOS, fetchFn);
+    const verdict = validateLangTotals(totals);
+    if (!verdict.ok) return langsFail(verdict.reason);
+    const next = buildLangSnapshot(totals, now);
+    await Promise.all([
+      env.STATS.put(KEY_LANGS_LIGHT, renderLangsCard(next, "light")),
+      env.STATS.put(KEY_LANGS_DARK, renderLangsCard(next, "dark")),
+    ]);
+    // Snapshot last, as in the stats publish.
+    await env.STATS.put(KEY_LANGS, JSON.stringify(next));
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof GitHubError) {
+      return langsFail(e.status !== null ? `GitHub HTTP ${e.status}: ${e.message}` : e.message);
+    }
+    return langsFail(e instanceof Error ? e.message : "unknown error");
   }
 }

@@ -1,9 +1,22 @@
-import { refresh, KEY_DARK, KEY_LIGHT } from "./refresh.ts";
+import {
+  refresh,
+  refreshLanguages,
+  KEY_DARK,
+  KEY_LANGS_DARK,
+  KEY_LANGS_LIGHT,
+  KEY_LIGHT,
+} from "./refresh.ts";
+import { renderLangsPlaceholder } from "./render/langs-card.ts";
 import { renderPlaceholder } from "./render/placeholder.ts";
+import type { Theme } from "./render/measure.ts";
 
-const ROUTES: Record<string, { key: string; theme: "light" | "dark" }> = {
-  "/stats-light.svg": { key: KEY_LIGHT, theme: "light" },
-  "/stats-dark.svg": { key: KEY_DARK, theme: "dark" },
+type Route = { key: string; theme: Theme; placeholder: (theme: Theme) => string };
+
+const ROUTES: Record<string, Route> = {
+  "/stats-light.svg": { key: KEY_LIGHT, theme: "light", placeholder: renderPlaceholder },
+  "/stats-dark.svg": { key: KEY_DARK, theme: "dark", placeholder: renderPlaceholder },
+  "/langs-light.svg": { key: KEY_LANGS_LIGHT, theme: "light", placeholder: renderLangsPlaceholder },
+  "/langs-dark.svg": { key: KEY_LANGS_DARK, theme: "dark", placeholder: renderLangsPlaceholder },
 };
 
 const SECURITY_HEADERS = {
@@ -27,7 +40,7 @@ export default {
       kvFailed = true;
       console.error(JSON.stringify({ event: "kv_read_failed" }));
     }
-    const body = stored ?? renderPlaceholder(route.theme);
+    const body = stored ?? route.placeholder(route.theme);
     const cache = stored ? "public, max-age=3600" : kvFailed ? "no-store" : "no-cache";
     return new Response(request.method === "HEAD" ? null : body, {
       headers: { ...SECURITY_HEADERS, "Cache-Control": cache },
@@ -35,9 +48,16 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Awaited and rethrown so Cloudflare's Cron events show a failed run; refresh() has already logged.
-    const run = refresh(env, new Date(controller.scheduledTime)).then((result) => {
-      if (!result.ok) throw new Error(result.reason);
+    // Both refreshes always run; each has already logged its own failure. Rejecting after both settle
+    // makes Cloudflare's Cron events show a failed run if either failed.
+    const when = new Date(controller.scheduledTime);
+    const run = Promise.allSettled([refresh(env, when), refreshLanguages(env, when)]).then((settled) => {
+      const reasons: string[] = [];
+      for (const s of settled) {
+        if (s.status === "rejected") reasons.push(s.reason instanceof Error ? s.reason.message : "unknown error");
+        else if (!s.value.ok) reasons.push(s.value.reason);
+      }
+      if (reasons.length > 0) throw new Error(reasons.join("; "));
     });
     ctx.waitUntil(run.catch(() => {}));
     await run;
