@@ -43,7 +43,7 @@ Set a 1-year expiry on both and add a calendar reminder to rotate them. When a t
 
 1. Install dependencies: `npm install`. The scripts run as `node scripts/*.ts`, so they need Node with native TypeScript type stripping: Node 22.18 or later 22.x, or 23.6 and later (Node 23.0 to 23.5 lack it; developed on Node 24).
 2. Copy `.dev.vars.example` to `.dev.vars` and fill in `GH_TOKEN_PROFILE` and `GH_TOKEN_REPOS`.
-3. Check the tokens: `npm run verify:tokens` (calls GitHub and prints the totals, the private repository count and the top 6 languages, never repository names). It runs every check and exits non-zero if any fails: total commits, pull requests and issues must each exceed their public counts, and `GH_TOKEN_REPOS` must see at least one private repository. The login is hard-coded in `scripts/verify-tokens.ts`; adjust it for your own account.
+3. Check the tokens: `npm run verify:tokens` (calls GitHub and prints the totals, the private repository count and the top 6 languages, never repository names). It runs every check and exits non-zero if any fails: total commits, pull requests and issues must each exceed their public counts, and `GH_TOKEN_REPOS` must see at least one private repository. A failed request is reported as a failure of that check without stopping the others. The login is the `LOGIN` constant at the top of the check section in `scripts/verify-tokens.ts`; adjust it for your own account.
 4. Set `GITHUB_LOGIN` under `vars` in `wrangler.jsonc` to the profile to read.
 5. Create a Cloudflare API token from the "Edit Cloudflare Workers" template and put it in a git-ignored `.env`:
    ```

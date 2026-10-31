@@ -79,7 +79,7 @@ describe("renderLangsCard", () => {
     for (const [idx, limit] of [[0, 154], [3, 275]] as const) {
       const svg = renderLangsCard(mk(idx), "light");
       const t = attrs(svg, "text").filter((x) => x["data-entry"] !== undefined)[idx];
-      const content = svg.match(new RegExp(`<text [^>]*data-entry[^>]*x="${t.x}" y="${t.y}"[^>]*>([^<]*)</text>`))![1];
+      const content = svg.match(new RegExp(`<text [^>]*data-entry[^>]*x="${t.x}" y="${t.y}"[^>]*>(.*?)</text>`))![1];
       expect(content).toContain("…");
       expect(content).toMatch(/ \d+\.\d\d%$/);
       const snapshot = mk(idx);
@@ -98,7 +98,7 @@ describe("renderLangsCard", () => {
         ),
         "light",
       );
-      return svg.match(new RegExp(`<text data-entry="${idx}"[^>]*>([^<]*)</text>`))![1];
+      return svg.match(new RegExp(`<text data-entry="${idx}"[^>]*>(.*?)</text>`))![1];
     };
     const nasty = "A&B <x>'s";
     expect(entryText(nasty, 0)).toBe("A&amp;B &lt;x&gt;&#39;s 21.05%");
@@ -106,7 +106,7 @@ describe("renderLangsCard", () => {
       const content = entryText(nasty.repeat(6), idx);
       expect(content).toContain("…");
       expect(content).not.toMatch(/&(?!amp;|lt;|gt;|quot;|#39;)/); // every ampersand starts a whole entity
-      expect(content).not.toMatch(/<|>/);
+      expect(content).not.toMatch(/[<>]/); // no raw markup survives in the full element text
     }
   });
 

@@ -19,4 +19,10 @@ describe("evaluateVisibility", () => {
     expect(evaluateVisibility({ ...ok, prsTotal: 2 }, 1).join("\n")).toContain("Contents: read-only");
     expect(evaluateVisibility({ ...ok, commitsTotal: 5 }, 1).join("\n")).not.toContain("Contents: read-only");
   });
+
+  it("does not blame access for counts that were not measured", () => {
+    expect(evaluateVisibility(ok, null)).toEqual([]);
+    expect(evaluateVisibility(null, 3)).toEqual([]);
+    expect(evaluateVisibility(null, null)).toEqual([]);
+  });
 });

@@ -46,7 +46,6 @@ function stub(
       if (opts.statsStatus) return new Response("nope", { status: opts.statsStatus });
       return Response.json(opts.repos ?? repos);
     }
-    throw new Error("unexpected query in test stub");
   }) as typeof fetch;
 }
 

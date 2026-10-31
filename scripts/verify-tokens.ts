@@ -34,43 +34,46 @@ if (!profile || !repos) {
   process.exit(1);
 }
 
-let stats;
-try {
-  stats = await fetchRawStats("kiri1101", { profile, repos });
-} catch (err) {
-  console.error(`Token check failed: ${err instanceof Error ? err.message : "unknown error"}`);
-  process.exit(1);
-}
+const LOGIN = "kiri1101";
+const failures: string[] = [];
+const reason = (err: unknown) => (err instanceof Error ? err.message : "unknown error");
 
-const { name: _name, ...numbers } = stats;
-console.log(JSON.stringify(numbers, null, 2));
+// Every check runs even if another fetch fails; failures are collected and the script exits once at the end.
+let stats: Awaited<ReturnType<typeof fetchRawStats>> | null = null;
+try {
+  stats = await fetchRawStats(LOGIN, { profile, repos });
+  const { name: _name, ...numbers } = stats;
+  console.log(JSON.stringify(numbers, null, 2));
+} catch (err) {
+  failures.push(`FAIL stats request failed: ${reason(err)}`);
+}
 
 // The languages card says "Incl. private repositories": prove the repos token really lists private ones.
 // Only counts and language names are printed, never repository names.
-let privateRepos = 0;
-let topLanguages: string[] = [];
-let fetchFailed = false;
+let privateRepos: number | null = null;
 try {
   const data = await graphql<{ user: { repositories: { totalCount: number } } | null }>(
     fetch,
     repos,
     "query($login: String!) { user(login: $login) { repositories(ownerAffiliations: OWNER, isFork: false, privacy: PRIVATE) { totalCount } } }",
-    { login: "kiri1101" },
+    { login: LOGIN },
   );
-  if (!data.user) throw new Error('GitHub user "kiri1101" not found in response');
+  if (!data.user) throw new Error(`GitHub user "${LOGIN}" not found in response`);
   privateRepos = data.user.repositories.totalCount;
-  const snapshot = buildLangSnapshot(await fetchLanguageTotals("kiri1101", repos), new Date());
-  topLanguages = snapshot.top.map((e) => `${e.name} ${e.percent.toFixed(2)}%`);
+  console.log(`Private owned non-fork repositories visible to GH_TOKEN_REPOS: ${privateRepos}`);
 } catch (err) {
-  console.error(`Languages check failed: ${err instanceof Error ? err.message : "unknown error"}`);
-  fetchFailed = true;
+  failures.push(`FAIL private repository count request failed: ${reason(err)}`);
 }
-console.log(`Private owned non-fork repositories visible to GH_TOKEN_REPOS: ${privateRepos}`);
-console.log("Top languages:");
-for (const line of topLanguages) console.log(`  ${line}`);
 
-// Run every check, report all failures, exit once.
-const failures = evaluateVisibility(stats, privateRepos);
+try {
+  const snapshot = buildLangSnapshot(await fetchLanguageTotals(LOGIN, repos), new Date());
+  console.log("Top languages:");
+  for (const e of snapshot.top) console.log(`  ${e.name} ${e.percent.toFixed(2)}%`);
+} catch (err) {
+  failures.push(`FAIL languages request failed: ${reason(err)}`);
+}
+
+failures.push(...evaluateVisibility(stats, privateRepos));
 for (const f of failures) console.error(f);
-if (failures.length > 0 || fetchFailed) process.exit(1);
+if (failures.length > 0) process.exit(1);
 console.log("PASS: private commits, PRs, issues and repositories are visible to the tokens.");
