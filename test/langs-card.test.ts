@@ -89,6 +89,27 @@ describe("renderLangsCard", () => {
     }
   });
 
+  it("escapes markup in names, and truncates before escaping so no entity is cut", () => {
+    const entryText = (name: string, idx: number) => {
+      const svg = renderLangsCard(
+        buildLangSnapshot(
+          Array.from({ length: 6 }, (_, k) => ({ name: k === idx ? name : `L${k}`, color: "#123456", bytes: 600 - k * 50 })),
+          at,
+        ),
+        "light",
+      );
+      return svg.match(new RegExp(`<text data-entry="${idx}"[^>]*>([^<]*)</text>`))![1];
+    };
+    const nasty = "A&B <x>'s";
+    expect(entryText(nasty, 0)).toBe("A&amp;B &lt;x&gt;&#39;s 21.05%");
+    for (const idx of [0, 3]) {
+      const content = entryText(nasty.repeat(6), idx);
+      expect(content).toContain("…");
+      expect(content).not.toMatch(/&(?!amp;|lt;|gt;|quot;|#39;)/); // every ampersand starts a whole entity
+      expect(content).not.toMatch(/<|>/);
+    }
+  });
+
   it("renders only real entries when there are few languages", () => {
     const s = buildLangSnapshot(totals.slice(0, 2), at);
     const svg = renderLangsCard(s, "light");
