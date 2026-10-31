@@ -37,13 +37,13 @@ Why two: the private-inclusive contribution (commit) totals are only available t
 
 Troubleshooting: only if `npm run verify:tokens` reports low pull request or issue totals, also grant the fine-grained token Contents: read-only. This is not needed in the reference setup.
 
-Set a 1-year expiry on both and add a calendar reminder to rotate them. When a token expires, the card keeps its last good version (it does not break) and Workers Logs show `refresh_failed`.
+Set a 1-year expiry on both and add a calendar reminder to rotate them. When a token expires, the cards keep their last good version (they do not break) and Workers Logs show `refresh_failed` (stats) or `langs_refresh_failed` (languages).
 
 ## Setup and deploy
 
 1. Install dependencies: `npm install`. The scripts run as `node scripts/*.ts`, so they need Node with native TypeScript type stripping: Node 22.18 or later 22.x, or 23.6 and later (Node 23.0 to 23.5 lack it; developed on Node 24).
 2. Copy `.dev.vars.example` to `.dev.vars` and fill in `GH_TOKEN_PROFILE` and `GH_TOKEN_REPOS`.
-3. Check the tokens: `npm run verify:tokens` (calls GitHub and prints the totals; it exits non-zero if they are below the expected minimums). The login and minimums are hard-coded in `scripts/verify-tokens.ts`; adjust them for your own account.
+3. Check the tokens: `npm run verify:tokens` (calls GitHub and prints the totals; it exits non-zero if they are below the expected minimums. It also checks that `GH_TOKEN_REPOS` can see your private repositories, printing only their count and the top 6 languages, and fails if the count is 0). The login and minimums are hard-coded in `scripts/verify-tokens.ts`; adjust them for your own account.
 4. Set `GITHUB_LOGIN` under `vars` in `wrangler.jsonc` to the profile to read.
 5. Create a Cloudflare API token from the "Edit Cloudflare Workers" template and put it in a git-ignored `.env`:
    ```
@@ -60,9 +60,11 @@ Set a 1-year expiry on both and add a calendar reminder to rotate them. When a t
    npx wrangler secret put GH_TOKEN_REPOS
    ```
 
-The Worker is then live at `https://github-profile-cards.<your-subdomain>.workers.dev`. Until the secrets are set and the first cron run happens (next 00, 06, 12 or 18 UTC) the stats endpoints return the placeholder card; that run fills in the data.
+The Worker is then live at `https://github-profile-cards.<your-subdomain>.workers.dev`. Until the secrets are set and the first cron run happens (next 00, 06, 12 or 18 UTC) the stats and languages endpoints return their placeholder cards; that run fills in the data.
 
 ## Using the images in a profile README
+
+The stats card and the languages card are embedded the same way. Stats first:
 
 ```html
 <picture>
@@ -76,7 +78,7 @@ The languages card is not linked, so it takes `<picture>` the same way. It is 30
 ```html
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://<worker-url>/langs-dark.svg">
-  <img alt="Most used languages" src="https://<worker-url>/langs-light.svg" height="165">
+  <img alt="Most used languages (incl. private repositories)" src="https://<worker-url>/langs-light.svg" height="165">
 </picture>
 ```
 
@@ -114,7 +116,7 @@ npx wrangler kv key delete snapshot.json --binding STATS --remote
 
 Wrangler 4 KV commands default to local storage, hence `--remote`.
 
-**The languages card shows a language you did not expect (for example a large JavaScript share).** GitHub counts committed build output and vendored bundles (such as a Nuxt `.output/` folder or `dist/`) in its language bytes. The fix is in the source repositories, not the Worker: add the folder to `.gitignore` (and untrack it with `git rm -r --cached`), or mark it in `.gitattributes`, for example `.output/** linguist-vendored`. The card follows on the next 6-hourly refresh once GitHub recalculates.
+**The languages card shows a language you did not expect (for example a large JavaScript share).** GitHub counts committed build output and vendored bundles (such as a Nuxt `.output/` folder or `dist/`) in its language bytes. The fix is in the source repositories, not the Worker: add the folder to `.gitignore` (and untrack it with `git rm -r --cached`), or mark it in `.gitattributes`, for example `.output/** linguist-vendored`. In practice GitHub recalculated the repository languages within minutes of the push, and the card then updates on the next 6-hourly refresh.
 
 ## Security notes
 

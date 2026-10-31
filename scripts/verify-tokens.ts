@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { fetchRawStats } from "../src/github/client.ts";
+import { fetchRawStats, graphql } from "../src/github/client.ts";
+import { fetchLanguageTotals } from "../src/github/languages.ts";
+import { buildLangSnapshot } from "../src/stats/languages.ts";
 
 const VARS_PATH = new URL("../.dev.vars", import.meta.url);
 
@@ -61,4 +63,31 @@ if (failures.length > 0) {
   console.error("If prsTotal or issuesTotal is low, add Contents: read-only to the fine-grained token and rerun.");
   process.exit(1);
 }
-console.log("PASS: all token checks meet the minimums.");
+
+// The languages card says "Incl. private repositories": prove the repos token really lists private ones.
+// Only counts and language names are printed, never repository names.
+let privateRepos: number;
+let topLanguages: string[];
+try {
+  const data = await graphql<{ user: { repositories: { totalCount: number } } | null }>(
+    fetch,
+    repos,
+    "query($login: String!) { user(login: $login) { repositories(ownerAffiliations: OWNER, isFork: false, privacy: PRIVATE) { totalCount } } }",
+    { login: "kiri1101" },
+  );
+  if (!data.user) throw new Error('GitHub user "kiri1101" not found in response');
+  privateRepos = data.user.repositories.totalCount;
+  const snapshot = buildLangSnapshot(await fetchLanguageTotals("kiri1101", repos), new Date());
+  topLanguages = snapshot.top.map((e) => `${e.name} ${e.percent.toFixed(2)}%`);
+} catch (err) {
+  console.error(`Languages check failed: ${err instanceof Error ? err.message : "unknown error"}`);
+  process.exit(1);
+}
+console.log(`Private owned non-fork repositories visible to GH_TOKEN_REPOS: ${privateRepos}`);
+console.log("Top languages:");
+for (const line of topLanguages) console.log(`  ${line}`);
+if (privateRepos === 0) {
+  console.error("FAIL: GH_TOKEN_REPOS sees 0 private repositories. Grant the fine-grained token access to all repositories (including private) and rerun.");
+  process.exit(1);
+}
+console.log("PASS: all token checks meet the minimums and private repositories are visible.");
