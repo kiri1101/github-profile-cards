@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fetchRawStats, graphql } from "../src/github/client.ts";
 import { fetchLanguageTotals } from "../src/github/languages.ts";
+import { evaluateVisibility } from "../src/github/token-checks.ts";
 import { buildLangSnapshot } from "../src/stats/languages.ts";
 
 const VARS_PATH = new URL("../.dev.vars", import.meta.url);
@@ -44,30 +45,11 @@ try {
 const { name: _name, ...numbers } = stats;
 console.log(JSON.stringify(numbers, null, 2));
 
-const minimums = {
-  commitsTotal: 1383,
-  commitsPublic: 246,
-  prsTotal: 237,
-  prsPublic: 49,
-  issuesTotal: 300,
-  issuesPublic: 56,
-} as const;
-
-const failures = Object.entries(minimums).filter(
-  ([key, min]) => stats[key as keyof typeof minimums] < min,
-);
-if (failures.length > 0) {
-  for (const [key, min] of failures) {
-    console.error(`FAIL ${key}: ${stats[key as keyof typeof minimums]} < ${min}`);
-  }
-  console.error("If prsTotal or issuesTotal is low, add Contents: read-only to the fine-grained token and rerun.");
-  process.exit(1);
-}
-
 // The languages card says "Incl. private repositories": prove the repos token really lists private ones.
 // Only counts and language names are printed, never repository names.
-let privateRepos: number;
-let topLanguages: string[];
+let privateRepos = 0;
+let topLanguages: string[] = [];
+let fetchFailed = false;
 try {
   const data = await graphql<{ user: { repositories: { totalCount: number } } | null }>(
     fetch,
@@ -81,13 +63,14 @@ try {
   topLanguages = snapshot.top.map((e) => `${e.name} ${e.percent.toFixed(2)}%`);
 } catch (err) {
   console.error(`Languages check failed: ${err instanceof Error ? err.message : "unknown error"}`);
-  process.exit(1);
+  fetchFailed = true;
 }
 console.log(`Private owned non-fork repositories visible to GH_TOKEN_REPOS: ${privateRepos}`);
 console.log("Top languages:");
 for (const line of topLanguages) console.log(`  ${line}`);
-if (privateRepos === 0) {
-  console.error("FAIL: GH_TOKEN_REPOS sees 0 private repositories. Grant the fine-grained token access to all repositories (including private) and rerun.");
-  process.exit(1);
-}
-console.log("PASS: all token checks meet the minimums and private repositories are visible.");
+
+// Run every check, report all failures, exit once.
+const failures = evaluateVisibility(stats, privateRepos);
+for (const f of failures) console.error(f);
+if (failures.length > 0 || fetchFailed) process.exit(1);
+console.log("PASS: private commits, PRs, issues and repositories are visible to the tokens.");

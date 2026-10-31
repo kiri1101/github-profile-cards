@@ -35,7 +35,7 @@ Two tokens, both read-only, set as Worker secrets:
 
 Why two: the private-inclusive contribution (commit) totals are only available through a classic token with `read:user`; fine-grained tokens can read private pull requests and issues but not those totals. A single classic token with `repo` could cover everything, but it is write-capable, so it is not used. Neither of the two tokens can write.
 
-Troubleshooting: only if `npm run verify:tokens` reports low pull request or issue totals, also grant the fine-grained token Contents: read-only. This is not needed in the reference setup.
+Troubleshooting: only if `npm run verify:tokens` reports that the pull request or issue totals are not above the public counts, also grant the fine-grained token Contents: read-only. This is not needed in the reference setup.
 
 Set a 1-year expiry on both and add a calendar reminder to rotate them. When a token expires, the cards keep their last good version (they do not break) and Workers Logs show `refresh_failed` (stats) or `langs_refresh_failed` (languages).
 
@@ -43,7 +43,7 @@ Set a 1-year expiry on both and add a calendar reminder to rotate them. When a t
 
 1. Install dependencies: `npm install`. The scripts run as `node scripts/*.ts`, so they need Node with native TypeScript type stripping: Node 22.18 or later 22.x, or 23.6 and later (Node 23.0 to 23.5 lack it; developed on Node 24).
 2. Copy `.dev.vars.example` to `.dev.vars` and fill in `GH_TOKEN_PROFILE` and `GH_TOKEN_REPOS`.
-3. Check the tokens: `npm run verify:tokens` (calls GitHub and prints the totals; it exits non-zero if they are below the expected minimums. It also checks that `GH_TOKEN_REPOS` can see your private repositories, printing only their count and the top 6 languages, and fails if the count is 0). The login and minimums are hard-coded in `scripts/verify-tokens.ts`; adjust them for your own account.
+3. Check the tokens: `npm run verify:tokens` (calls GitHub and prints the totals, the private repository count and the top 6 languages, never repository names). It runs every check and exits non-zero if any fails: total commits, pull requests and issues must each exceed their public counts, and `GH_TOKEN_REPOS` must see at least one private repository. The login is hard-coded in `scripts/verify-tokens.ts`; adjust it for your own account.
 4. Set `GITHUB_LOGIN` under `vars` in `wrangler.jsonc` to the profile to read.
 5. Create a Cloudflare API token from the "Edit Cloudflare Workers" template and put it in a git-ignored `.env`:
    ```
